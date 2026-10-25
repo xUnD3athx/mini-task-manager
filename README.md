@@ -7,9 +7,6 @@
 - 使用原生 Win32 API，使用 GDI 实现渲染
 - 并使用了 Windows AppBar 实现顶部栏效果
 ## 截图
-- 顶部栏
-![](screenshots/screenshot_normal.png)
-- 展开后
 ![](screenshots/screenshot_expand.png)
 ## 使用
 打开 **mini-task-manager.exe** 即可使用
