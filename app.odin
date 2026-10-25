@@ -30,8 +30,6 @@ Color :: [3]u8
 COL_TEXT       :: Color{236, 236, 242}
 COL_MUTED      :: Color{148, 148, 163}
 COL_BADGE_TEXT :: Color{15, 15, 19}
-COL_GREEN      :: Color{94, 214, 143}
-COL_LIVE_BG    :: Color{27, 45, 34}
 
 Theme :: struct {
 	name:    string,
@@ -223,7 +221,7 @@ Fonts :: struct {
 }
 
 Brushes :: struct {
-	bg, sidebar, card, selected, badge, accent, green, live_bg,
+	bg, sidebar, card, selected, badge, accent,
 	track, thumb, cpu_fill, mem_fill, gpu_fill, gpu, grid, line, dark, light, muted: win.HBRUSH,
 }
 
@@ -1297,8 +1295,6 @@ create_visual_objects :: proc() {
 	app.brushes.selected = win.CreateSolidBrush(colorref(mix_color(theme.bg, accent, 0.16)))
 	app.brushes.badge = win.CreateSolidBrush(colorref(mix_color(theme.card, COL_TEXT, 0.04)))
 	app.brushes.accent = win.CreateSolidBrush(colorref(accent))
-	app.brushes.green = win.CreateSolidBrush(colorref(COL_GREEN))
-	app.brushes.live_bg = win.CreateSolidBrush(colorref(COL_LIVE_BG))
 	app.brushes.track = win.CreateSolidBrush(colorref(theme.line))
 	app.brushes.thumb = win.CreateSolidBrush(colorref(theme.border))
 	app.brushes.cpu_fill = win.CreateSolidBrush(colorref(mix_color(theme.card, accent, 0.22)))
@@ -1325,8 +1321,6 @@ delete_visual_objects :: proc() {
 	delete_gdi(app.brushes.selected)
 	delete_gdi(app.brushes.badge)
 	delete_gdi(app.brushes.accent)
-	delete_gdi(app.brushes.green)
-	delete_gdi(app.brushes.live_bg)
 	delete_gdi(app.brushes.track)
 	delete_gdi(app.brushes.thumb)
 	delete_gdi(app.brushes.cpu_fill)

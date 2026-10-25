@@ -189,12 +189,7 @@ draw_bar :: proc(dc: win.HDC) {
 
 	exit := exit_button_rect()
 	settings := settings_button_rect()
-	live_w := S(58)
-	live_h := S(22)
-	live_x := settings.left - S(10) - live_w
 
-	draw_bar_divider(dc, live_x - S(10))
-	draw_live_badge(dc, live_x, (app.bar_h - live_h)/2, live_w, live_h)
 	draw_settings_button(dc, settings)
 
 	draw_text(dc, "×", exit.left, exit.top, exit.right - exit.left, exit.bottom - exit.top,
@@ -686,22 +681,6 @@ draw_list_scrollbar :: proc(dc: win.HDC, panel_right, list_top, list_bottom: i32
 
 	thumb_rect := win.RECT{track_x, thumb_y, track_x + S(3), thumb_y + thumb_h}
 	_ = win.FillRect(dc, &thumb_rect, app.brushes.thumb)
-}
-
-draw_live_badge :: proc(dc: win.HDC, x, y, w, h: i32) {
-	pill := win.RECT{x, y, x + w, y + h}
-	fill_round(dc, pill, app.brushes.live_bg, app.pens.null, h/2)
-
-	dot := S(6)
-	dot_y := y + (h - dot) / 2
-	old_brush := win.SelectObject(dc, win.HGDIOBJ(app.brushes.green))
-	old_pen := win.SelectObject(dc, win.HGDIOBJ(app.pens.null))
-	_ = win.Ellipse(dc, x + S(9), dot_y, x + S(9) + dot, dot_y + dot)
-	_ = win.SelectObject(dc, old_pen)
-	_ = win.SelectObject(dc, old_brush)
-
-	draw_text(dc, "LIVE", x + S(19), y, w - S(22), h, app.fonts.tiny, COL_GREEN,
-		DT_LEFT | DT_VCENTER | DT_SINGLELINE)
 }
 
 draw_cpu_card :: proc(dc: win.HDC, rect: win.RECT) {
