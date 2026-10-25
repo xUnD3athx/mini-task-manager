@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="512"
+   height="512"
+   viewBox="0 0 135.46666 135.46667"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4 (86a8ad7, 2024-10-11)"
+   sodipodi:docname="icon.svg"
+   inkscape:export-filename="icon.png"
+   inkscape:export-xdpi="300"
+   inkscape:export-ydpi="300"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     inkscape:zoom="0.81197745"
+     inkscape:cx="-108.37739"
+     inkscape:cy="113.91942"
+     inkscape:window-width="2560"
+     inkscape:window-height="1566"
+     inkscape:window-x="-11"
+     inkscape:window-y="-11"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1"
+     showgrid="false">
+    <inkscape:grid
+       id="grid15"
+       units="mm"
+       originx="0"
+       originy="0"
+       spacingx="0.99999995"
+       spacingy="1"
+       empcolor="#0099e5"
+       empopacity="0.30196078"
+       color="#0099e5"
+       opacity="0.14901961"
+       empspacing="5"
+       enabled="true"
+       visible="false" />
+  </sodipodi:namedview>
+  <defs
+     id="defs1">
+    <linearGradient
+       id="linearGradient17"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#00ffab;stop-opacity:1;"
+         offset="0"
+         id="stop17" />
+      <stop
+         style="stop-color:#a6ff00;stop-opacity:1;"
+         offset="0.5"
+         id="stop19" />
+      <stop
+         style="stop-color:#ff6666;stop-opacity:1;"
+         offset="1"
+         id="stop18" />
+    </linearGradient>
+    <rect
+       x="18.897638"
+       y="170.07874"
+       width="473.1428"
+       height="221.66742"
+       id="rect15" />
+    <linearGradient
+       id="linearGradient9"
+       inkscape:collect="always">
+      <stop
+         style="stop-color:#ff8080;stop-opacity:1;"
+         offset="0"
+         id="stop9" />
+      <stop
+         style="stop-color:#5c40bf;stop-opacity:1;"
+         offset="1"
+         id="stop10" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient9"
+       id="linearGradient10"
+       x1="19.838633"
+       y1="19.838633"
+       x2="115.62803"
+       y2="115.62803"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(0.6835938,0,0,0.6835938,21.431248,21.431254)" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient17"
+       id="linearGradient18"
+       x1="161.08093"
+       y1="225.1181"
+       x2="355.98206"
+       y2="225.1181"
+       gradientUnits="userSpaceOnUse"
+       spreadMethod="pad" />
+    <rect
+       x="18.897638"
+       y="170.07874"
+       width="473.14279"
+       height="221.66742"
+       id="rect15-1" />
+  </defs>
+  <g
+     inkscape:label="图层 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <ellipse
+       style="display:inline;fill:url(#linearGradient10);fill-opacity:1;stroke:none;stroke-width:2.64582;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
+       id="path8"
+       cx="67.73333"
+       cy="67.73333"
+       rx="46.301998"
+       ry="46.302086" />
+    <text
+       xml:space="preserve"
+       transform="matrix(0.32341128,0,0,0.23430074,-17.004177,-0.09346961)"
+       id="text15"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:170.667px;font-family:HongLei-HL-2;-inkscape-font-specification:HongLei-HL-2;text-align:center;writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect15);display:inline;fill:url(#linearGradient18);fill-rule:nonzero;stroke:none;stroke-width:9.61165;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
+       inkscape:highlight-color="#4587ef"
+       x="97.450562"
+       y="0"><tspan
+         x="67.309195"
+         y="320.01839"
+         id="tspan4"><tspan
+           style="display:inline"
+           id="tspan3">MTM</tspan></tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.69156px;font-family:'Segoe UI';-inkscape-font-specification:'Segoe UI Italic';text-align:center;writing-mode:lr-tb;direction:ltr;text-anchor:middle;mix-blend-mode:normal;fill:#ffffff;fill-opacity:1;fill-rule:nonzero;stroke:none;stroke-width:2.64583;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1"
+       x="66.920753"
+       y="91.100456"
+       id="text280"><tspan
+         sodipodi:role="line"
+         id="tspan280"
+         style="font-style:italic;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Segoe UI';-inkscape-font-specification:'Segoe UI Italic';text-align:center;text-anchor:middle;fill:#ffffff;fill-opacity:1;stroke-width:2.64583"
+         x="66.920753"
+         y="91.100456">MiniTaskManager</tspan></text>
+  </g>
+</svg>
