@@ -1,7 +1,7 @@
 # MiniTaskManager
 *此项目使用AI编程实现*  
 使用 Odin 语言编写的简易 Windows 任务管理器  
-![](icon.png)
+![](icon.ico)
 ## 技术简介
 - 使用 Odin 语言编写
 - 使用原生 Win32 API，使用 GDI 实现渲染
