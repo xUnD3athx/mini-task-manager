@@ -156,10 +156,10 @@ window_proc :: proc "system" (
 		pt: win.POINT
 		_ = win.GetCursorPos(&pt)
 		_ = win.ScreenToClient(hwnd, &pt)
-		if pt.y >= 0 && pt.y < app.bar_h &&
-		   !point_in_rect(pt.x, pt.y, tasks_button_rect()) &&
-		   !point_in_rect(pt.x, pt.y, settings_button_rect()) &&
-		   !point_in_rect(pt.x, pt.y, exit_button_rect()) {
+		if bar_y := pt.y - bar_top(); bar_y >= 0 && bar_y < app.bar_h &&
+		   !point_in_rect(pt.x, bar_y, tasks_button_rect()) &&
+		   !point_in_rect(pt.x, bar_y, settings_button_rect()) &&
+		   !point_in_rect(pt.x, bar_y, exit_button_rect()) {
 			return MA_NOACTIVATE
 		}
 		return MA_ACTIVATE
@@ -173,7 +173,8 @@ window_proc :: proc "system" (
 		return 0
 
 	case win.WM_ACTIVATE:
-		if u16(wparam & 0xffff) == win.WA_INACTIVE && app.view != .none && !app.color_dialog_open {
+		if u16(wparam & 0xffff) == win.WA_INACTIVE && app.view != .none &&
+		   !app.color_dialog_open && GetTickCount64() >= app.deactivate_guard_until {
 			set_view(.none)
 		}
 		return 0
@@ -257,6 +258,47 @@ remove_appbar :: proc(hwnd: win.HWND) {
 	app.appbar_registered = false
 }
 
+drawer_room :: proc() -> i32 {
+	if settings.dock == .bottom {
+		return app.bar_rect.top
+	}
+	return app.screen_h - app.bar_rect.top
+}
+
+apply_window_rect :: proc() {
+	if app.hwnd == nil {
+		return
+	}
+
+	height := app.bar_h
+	if app.view != .none {
+		height += app.drawer_h
+		room := drawer_room()
+		if height > room {
+			height = room
+		}
+	}
+	if height < app.bar_h {
+		height = app.bar_h
+	}
+
+	y := app.bar_rect.top
+	if settings.dock == .bottom {
+		y = app.bar_rect.bottom - height
+	}
+
+	_ = win.SetWindowPos(
+		app.hwnd,
+		win.HWND_TOPMOST,
+		app.bar_rect.left,
+		y,
+		app.bar_rect.right - app.bar_rect.left,
+		height,
+		win.SWP_NOACTIVATE,
+	)
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 position_appbar :: proc(hwnd: win.HWND) {
 	if app.appbar_moving {
 		return
@@ -267,39 +309,35 @@ position_appbar :: proc(hwnd: win.HWND) {
 	abd: win.APPBARDATA
 	abd.cbSize = u32(size_of(win.APPBARDATA))
 	abd.hWnd = hwnd
-	abd.uEdge = win.ABE_TOP
-	abd.rc = win.RECT{0, 0, app.screen_w, app.bar_h}
+
+	if settings.dock == .bottom {
+		abd.uEdge = win.ABE_BOTTOM
+		abd.rc = win.RECT{0, app.screen_h - app.bar_h, app.screen_w, app.screen_h}
+	} else {
+		abd.uEdge = win.ABE_TOP
+		abd.rc = win.RECT{0, 0, app.screen_w, app.bar_h}
+	}
 
 	if app.appbar_registered {
 		_ = win.SHAppBarMessage(win.ABM_QUERYPOS, &abd)
-		abd.rc.bottom = abd.rc.top + app.bar_h
+		if settings.dock == .bottom {
+			abd.rc.top = abd.rc.bottom - app.bar_h
+		} else {
+			abd.rc.bottom = abd.rc.top + app.bar_h
+		}
 		_ = win.SHAppBarMessage(win.ABM_SETPOS, &abd)
 	}
 
 	if abd.rc.right <= abd.rc.left || abd.rc.bottom <= abd.rc.top {
-		abd.rc = win.RECT{0, 0, app.screen_w, app.bar_h}
+		if settings.dock == .bottom {
+			abd.rc = win.RECT{0, app.screen_h - app.bar_h, app.screen_w, app.screen_h}
+		} else {
+			abd.rc = win.RECT{0, 0, app.screen_w, app.bar_h}
+		}
 	}
 	app.bar_rect = abd.rc
 
-	height := app.bar_h
-	if app.view != .none {
-		height += app.drawer_h
-		max_h := app.screen_h - app.bar_rect.top
-		if height > max_h {
-			height = max_h
-		}
-	}
-
-	_ = win.SetWindowPos(
-		hwnd,
-		win.HWND_TOPMOST,
-		app.bar_rect.left,
-		app.bar_rect.top,
-		app.bar_rect.right - app.bar_rect.left,
-		height,
-		win.SWP_NOACTIVATE,
-	)
-	_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+	apply_window_rect()
 }
 
 set_view :: proc(view: Drawer_View) {
@@ -309,24 +347,7 @@ set_view :: proc(view: Drawer_View) {
 	app.view = view
 	app.refresh_edit = false
 
-	height := app.bar_h
-	if view != .none {
-		height += app.drawer_h
-		max_h := app.screen_h - app.bar_rect.top
-		if height > max_h {
-			height = max_h
-		}
-	}
-
-	_ = win.SetWindowPos(
-		app.hwnd,
-		win.HWND_TOPMOST,
-		app.bar_rect.left,
-		app.bar_rect.top,
-		app.bar_rect.right - app.bar_rect.left,
-		height,
-		win.SWP_NOACTIVATE,
-	)
+	apply_window_rect()
 	refresh_window_preview()
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
@@ -413,16 +434,16 @@ handle_click :: proc(lparam: win.LPARAM) {
 	x := i32(lparam & 0xffff)
 	y := i32((lparam >> 16) & 0xffff)
 
-	if y < app.bar_h {
-		if point_in_rect(x, y, tasks_button_rect()) {
+	if bar_y := y - bar_top(); bar_y >= 0 && bar_y < app.bar_h {
+		if point_in_rect(x, bar_y, tasks_button_rect()) {
 			toggle_view(.tasks)
 			return
 		}
-		if point_in_rect(x, y, settings_button_rect()) {
+		if point_in_rect(x, bar_y, settings_button_rect()) {
 			toggle_view(.settings)
 			return
 		}
-		if point_in_rect(x, y, exit_button_rect()) {
+		if point_in_rect(x, bar_y, exit_button_rect()) {
 			_ = win.PostMessageW(app.hwnd, win.WM_CLOSE, 0, 0)
 			return
 		}
@@ -599,6 +620,14 @@ handle_settings_click :: proc(x, y: i32) {
 		}
 		if point_in_rect(x, y, settings_refresh_value_rect(layout)) {
 			begin_refresh_edit()
+			return
+		}
+	}
+
+	dock_modes := [2]Dock_Mode{.top, .bottom}
+	for i in 0..<len(dock_modes) {
+		if point_in_rect(x, y, settings_dock_chip_rect(layout, i)) {
+			settings_set_dock(dock_modes[i])
 			return
 		}
 	}

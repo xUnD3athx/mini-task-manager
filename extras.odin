@@ -42,6 +42,7 @@ foreign user32 {
 @(default_calling_convention="system")
 foreign gdi32 {
 	Polyline :: proc(hdc: win.HDC, points: [^]win.POINT, count: i32) -> win.BOOL ---
+	SetViewportOrgEx :: proc(hdc: win.HDC, x, y: i32, previous: ^win.POINT) -> win.BOOL ---
 }
 
 @(default_calling_convention="system")

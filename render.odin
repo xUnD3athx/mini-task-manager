@@ -15,7 +15,17 @@ paint :: proc(dc: win.HDC) {
 	if app.view != .none && app.height > app.bar_h {
 		draw_drawer(dc)
 	}
-	draw_bar(dc)
+
+	// The bar is drawn in its own local space and shifted to the bottom edge
+	// when the window is pinned there.
+	if settings.dock == .bottom {
+		previous: win.POINT
+		_ = SetViewportOrgEx(dc, 0, bar_top(), &previous)
+		draw_bar(dc)
+		_ = SetViewportOrgEx(dc, previous.x, previous.y, nil)
+	} else {
+		draw_bar(dc)
+	}
 }
 
 draw_text :: proc(
@@ -1183,6 +1193,36 @@ draw_settings_view :: proc(dc: win.HDC) {
 		draw_text(dc, "Custom…", custom.left, custom.top, custom.right - custom.left, custom.bottom - custom.top,
 			app.fonts.tiny, COL_TEXT, DT_CENTER | DT_VCENTER | DT_SINGLELINE)
 	}
+
+	dock_label_y := settings_dock_label_y(layout)
+	draw_text(dc, "POSITION", layout.colors.left, dock_label_y,
+		layout.colors.right - layout.colors.left, S(14),
+		app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+
+	dock_modes := [2]Dock_Mode{.top, .bottom}
+	dock_labels := DOCK_LABELS
+	for i in 0..<len(dock_modes) {
+		chip := settings_dock_chip_rect(layout, i)
+		selected := settings.dock == dock_modes[i]
+
+		brush := app.brushes.badge
+		text_color := COL_TEXT
+		if selected {
+			brush = app.brushes.accent
+			text_color = COL_BADGE_TEXT
+		}
+		fill_round(dc, chip, brush, app.pens.border, S(7))
+
+		draw_text(dc, dock_labels[i], chip.left, chip.top,
+			chip.right - chip.left, chip.bottom - chip.top, app.fonts.tiny, text_color,
+			DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS)
+	}
+
+	dock_hints := DOCK_HINTS
+	first_chip := settings_dock_chip_rect(layout, 0)
+	draw_text(dc, dock_hints[int(settings.dock)], layout.colors.left, first_chip.bottom + S(10),
+		layout.colors.right - layout.colors.left, S(14),
+		app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS)
 
 	for i in 0..<len(THEMES) {
 		preview := settings_theme_rect(layout, i)

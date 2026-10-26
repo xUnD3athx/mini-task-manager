@@ -113,6 +113,17 @@ Module_Flags :: struct {
 	uptime:  bool,
 }
 
+Dock_Mode :: enum {
+	top,
+	bottom,
+}
+
+DOCK_LABELS :: [2]string{"TOP", "BOTTOM"}
+DOCK_HINTS :: [2]string{
+	"Pinned to the top edge and reserves it.",
+	"Pinned to the bottom edge; the drawer opens upward.",
+}
+
 Settings :: struct {
 	modules:           Module_Flags,
 	accent:            Color,
@@ -127,6 +138,7 @@ Settings :: struct {
 	refresh_ms:        int,
 	refresh_custom:    int,
 	refresh_custom_mode: bool,
+	dock:              Dock_Mode,
 }
 
 Sort_Field :: enum {
@@ -176,6 +188,7 @@ default_settings :: proc() -> Settings {
 		sort_desc = true,
 		refresh_ms = 1000,
 		refresh_custom = 750,
+		dock = .top,
 	}
 }
 
@@ -401,6 +414,7 @@ App :: struct {
 	drawer_h:           i32,
 	view:               Drawer_View,
 	color_dialog_open:  bool,
+	deactivate_guard_until: u64,
 	refresh_edit:       bool,
 	refresh_edit_buf:   [8]u8,
 	refresh_edit_len:   int,
@@ -566,6 +580,29 @@ tasks_panel_width :: proc() -> i32 {
 	return w
 }
 
+// The window hosts the bar at its top (pinned top) or at its bottom (pinned
+// bottom); the drawer fills the remainder.
+bar_top :: proc() -> i32 {
+	if settings.dock == .bottom {
+		return app.height - app.bar_h
+	}
+	return 0
+}
+
+drawer_top :: proc() -> i32 {
+	if settings.dock == .bottom {
+		return 0
+	}
+	return app.bar_h
+}
+
+drawer_bottom :: proc() -> i32 {
+	if settings.dock == .bottom {
+		return app.height - app.bar_h
+	}
+	return app.height
+}
+
 tasks_geometry :: proc() -> Tasks_Geometry {
 	pad := S(TASK_PANEL_PADDING_DIP)
 	panel_w := tasks_panel_width()
@@ -573,11 +610,11 @@ tasks_geometry :: proc() -> Tasks_Geometry {
 		return {}
 	}
 
-	bottom := app.bar_h + app.drawer_h
+	bottom := drawer_top() + app.drawer_h
 	if app.view != .none && app.height > app.bar_h {
-		bottom = app.height
+		bottom = drawer_bottom()
 	}
-	top := app.bar_h + pad
+	top := drawer_top() + pad
 	band_h := core_band_height()
 	if band_h > 0 {
 		top += band_h + S(14)
@@ -622,7 +659,7 @@ core_band_layout :: proc() -> Core_Band_Layout {
 	}
 
 	pad := S(TASK_PANEL_PADDING_DIP)
-	top := app.bar_h + pad
+	top := drawer_top() + pad
 	layout.rect = win.RECT{pad, top, app.width - pad, top + height}
 
 	inner := S(16)
@@ -796,7 +833,7 @@ Settings_Layout :: struct {
 }
 
 settings_layout :: proc() -> Settings_Layout {
-	outer := win.RECT{S(18), app.bar_h + S(18), app.width - S(18), app.height - S(18)}
+	outer := win.RECT{S(18), drawer_top() + S(18), app.width - S(18), drawer_bottom() - S(18)}
 	reset := win.RECT{outer.right - S(24) - S(138), outer.top + S(16), outer.right - S(24), outer.top + S(46)}
 
 	inner_left := outer.left + S(24)
@@ -925,6 +962,20 @@ settings_refresh_plus_rect :: proc(layout: Settings_Layout) -> win.RECT {
 	value := settings_refresh_value_rect(layout)
 	x := value.right + S(6)
 	return win.RECT{x, value.top, x + S(26), value.bottom}
+}
+
+settings_dock_label_y :: proc(layout: Settings_Layout) -> i32 {
+	return settings_color_label_y(layout, 2) + S(68)
+}
+
+settings_dock_chip_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
+	count := len(DOCK_LABELS)
+	gap := S(8)
+	avail := layout.colors.right - layout.colors.left
+	w := clamp((avail - gap*i32(count-1)) / i32(count), S(90), S(150))
+	x := layout.colors.left + i32(index)*(w + gap)
+	y := settings_dock_label_y(layout) + S(18)
+	return win.RECT{x, y, x + w, y + S(26)}
 }
 
 get_core_count :: proc() {
@@ -1912,6 +1963,23 @@ settings_set_theme :: proc(index: int) {
 	apply_visual_settings()
 }
 
+settings_set_dock :: proc(mode: Dock_Mode) {
+	if settings.dock == mode {
+		return
+	}
+	settings.dock = mode
+	// Moving an AppBar can hand activation away long enough for the drawer to
+	// close itself; ignore that deactivation while the window is re-anchored.
+	app.deactivate_guard_until = GetTickCount64() + 600
+	save_settings()
+
+	if !app.appbar_registered {
+		register_appbar(app.hwnd)
+	}
+	position_appbar(app.hwnd)
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 settings_toggle_module :: proc(id: Module_Id) {
 	if id == .cores && !settings.modules.cpu {
 		return
@@ -2215,6 +2283,8 @@ parse_settings :: proc(text: string) {
 			}
 		case "refresh_custom_mode":
 			settings.refresh_custom_mode = parse_bool(value)
+		case "dock":
+			settings.dock = Dock_Mode(clamp(parse_int(value), 0, len(DOCK_LABELS)-1))
 		}
 	}
 
@@ -2281,7 +2351,7 @@ save_settings :: proc() {
 		buf[:],
 		"version=3\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
 		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\nrefresh_ms=%d\n" +
-		"refresh_custom=%d\nrefresh_custom_mode=%d\n",
+		"refresh_custom=%d\nrefresh_custom_mode=%d\ndock=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -2301,6 +2371,7 @@ save_settings :: proc() {
 		settings.refresh_ms,
 		settings.refresh_custom,
 		int(settings.refresh_custom_mode),
+		int(settings.dock),
 	)
 	_ = os.write_entire_file(path, content)
 }
