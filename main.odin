@@ -461,15 +461,40 @@ handle_tasks_click :: proc(x, y: i32) {
 
 	row := int((y - geo.list_top) / S(TASK_ROW_HEIGHT_DIP))
 	index := app.scroll + row
-	if row < geo.visible && index >= 0 && index < app.process_count {
-		pid := app.processes[index].pid
-		if pid != app.selected_pid {
-			app.task = Task_Metrics{pid = pid}
+	if row < geo.visible && index >= 0 && index < app.task_row_count {
+		item := app.task_rows[index]
+		switch item.kind {
+		case .group:
+			g := &app.groups[item.index]
+			// Only the triangle toggles the subtree; the rest of the row selects
+			// the whole application.
+			if x < geo.panel.left + S(34) {
+				group_set_expanded(g.name, !group_is_expanded(g.name))
+				rebuild_task_rows()
+				clamp_scroll()
+				_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+				return
+			}
+
+			if !app.group_selected || !same_task_name(app.selected_group, g.name) {
+				app.task = Task_Metrics{group_mode = true, group = g.name}
+			}
+			app.selected_group = g.name
+			app.group_selected = true
+			app.has_selection = true
+			refresh_window_preview()
+			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		case .process:
+			p := &app.processes[item.index]
+			if app.group_selected || p.pid != app.selected_pid {
+				app.task = Task_Metrics{pid = p.pid}
+			}
+			app.selected_pid = p.pid
+			app.group_selected = false
+			app.has_selection = true
+			refresh_window_preview()
+			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 		}
-		app.selected_pid = pid
-		app.has_selection = true
-		refresh_window_preview()
-		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 	}
 }
 

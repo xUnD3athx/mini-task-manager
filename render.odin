@@ -542,14 +542,21 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 		return
 	}
 
+	t := &app.task
 	p, found := find_process(app.selected_pid)
 
-	// Header: process name, PID and total CPU time.
+	// Header: process or application name, PID/count and total CPU time.
+	time_buf: [32]u8
+	time_value := format_cpu_time(time_buf[:], t.cpu_time)
 	meta_buf: [96]u8
-	meta := fmt.bprintf(meta_buf[:], "PID %d", app.selected_pid)
-	if found {
-		time_buf: [32]u8
-		time_value := format_cpu_time(time_buf[:], p.cpu_time)
+	meta := ""
+	if app.group_selected {
+		count_word := "processes"
+		if t.count == 1 {
+			count_word = "process"
+		}
+		meta = fmt.bprintf(meta_buf[:], "%d %s · CPU time %s", t.count, count_word, time_value)
+	} else {
 		meta = fmt.bprintf(meta_buf[:], "PID %d · CPU time %s", app.selected_pid, time_value)
 	}
 
@@ -558,7 +565,11 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 	if name_w < S(60) {
 		name_w = S(60)
 	}
-	if found {
+	if app.group_selected {
+		draw_text_w(dc, win.wstring(raw_data(app.selected_group[:])), layout.title.left, layout.title.top,
+			name_w, layout.title.bottom - layout.title.top, app.fonts.title, COL_TEXT,
+			DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
+	} else if found {
 		draw_text_w(dc, win.wstring(raw_data(p.name[:])), layout.title.left, layout.title.top,
 			name_w, layout.title.bottom - layout.title.top, app.fonts.title, COL_TEXT,
 			DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
@@ -578,44 +589,44 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 	write_buf: [32]u8
 	gpu_buf: [16]u8
 
-	cpu_value := "—"
-	mem_value := "—"
-	threads_value := "—"
-	if found {
-		cpu_value = fmt.bprintf(cpu_buf[:], "%d%%", i32(p.cpu_percent + 0.5))
-		mem_value = format_memory(mem_buf[:], p.working_set)
-		threads_value = fmt.bprintf(threads_buf[:], "%d", p.threads)
-	}
+	cpu_value := fmt.bprintf(cpu_buf[:], "%d%%", i32(t.cpu + 0.5))
+	mem_value := format_memory(mem_buf[:], t.mem_bytes)
+	threads_value := fmt.bprintf(threads_buf[:], "%d", t.threads)
 
 	handles_value := "—"
-	if app.task.handles > 0 {
-		handles_value = fmt.bprintf(handles_buf[:], "%d", app.task.handles)
+	if t.handles > 0 {
+		handles_value = fmt.bprintf(handles_buf[:], "%d", t.handles)
 	}
 
 	gpu_value := "—"
 	if app.gpu_ok {
-		gpu_value = fmt.bprintf(gpu_buf[:], "%d%%", i32(app.task.gpu + 0.5))
+		gpu_value = fmt.bprintf(gpu_buf[:], "%d%%", i32(t.gpu + 0.5))
 	}
 
-	read_factor, read_suffix := rate_scale(app.task.read_bps)
-	read_value := fmt.bprintf(read_buf[:], "%.1f %s", app.task.read_bps/read_factor, read_suffix)
-	write_factor, write_suffix := rate_scale(app.task.write_bps)
-	write_value := fmt.bprintf(write_buf[:], "%.1f %s", app.task.write_bps/write_factor, write_suffix)
+	read_factor, read_suffix := rate_scale(t.read_bps)
+	read_value := fmt.bprintf(read_buf[:], "%.1f %s", t.read_bps/read_factor, read_suffix)
+	write_factor, write_suffix := rate_scale(t.write_bps)
+	write_value := fmt.bprintf(write_buf[:], "%.1f %s", t.write_bps/write_factor, write_suffix)
 
-	draw_metric_card(dc, layout.cpu, "CPU", cpu_value, app.task.cpu_samples[:], 100,
+	cpu_max: f32 = 100
+	if app.group_selected {
+		cpu_max = scaled_peak(t.cpu_samples[:], 100)
+	}
+
+	draw_metric_card(dc, layout.cpu, "CPU", cpu_value, t.cpu_samples[:], cpu_max,
 		app.pens.cpu, app.brushes.cpu_fill)
-	draw_metric_card(dc, layout.memory, "MEMORY", mem_value, app.task.mem_samples[:],
-		scaled_peak(app.task.mem_samples[:], 1), app.pens.mem, app.brushes.mem_fill)
-	draw_metric_card(dc, layout.gpu, "GPU", gpu_value, app.task.gpu_samples[:], 100,
+	draw_metric_card(dc, layout.memory, "MEMORY", mem_value, t.mem_samples[:],
+		scaled_peak(t.mem_samples[:], 1), app.pens.mem, app.brushes.mem_fill)
+	draw_metric_card(dc, layout.gpu, "GPU", gpu_value, t.gpu_samples[:], 100,
 		app.pens.gpu, app.brushes.gpu_fill)
-	draw_metric_card(dc, layout.io_read, "I/O READ", read_value, app.task.read_samples[:],
-		scaled_peak(app.task.read_samples[:], 1024), app.pens.mem, app.brushes.mem_fill)
-	draw_metric_card(dc, layout.io_write, "I/O WRITE", write_value, app.task.write_samples[:],
-		scaled_peak(app.task.write_samples[:], 1024), app.pens.gpu, app.brushes.gpu_fill)
-	draw_metric_card(dc, layout.threads, "THREADS", threads_value, app.task.threads_samples[:],
-		scaled_peak(app.task.threads_samples[:], 1), app.pens.cpu, app.brushes.cpu_fill)
-	draw_metric_card(dc, layout.handles, "HANDLES", handles_value, app.task.handles_samples[:],
-		scaled_peak(app.task.handles_samples[:], 1), app.pens.cpu, app.brushes.cpu_fill)
+	draw_metric_card(dc, layout.io_read, "I/O READ", read_value, t.read_samples[:],
+		scaled_peak(t.read_samples[:], 1024), app.pens.mem, app.brushes.mem_fill)
+	draw_metric_card(dc, layout.io_write, "I/O WRITE", write_value, t.write_samples[:],
+		scaled_peak(t.write_samples[:], 1024), app.pens.gpu, app.brushes.gpu_fill)
+	draw_metric_card(dc, layout.threads, "THREADS", threads_value, t.threads_samples[:],
+		scaled_peak(t.threads_samples[:], 1), app.pens.cpu, app.brushes.cpu_fill)
+	draw_metric_card(dc, layout.handles, "HANDLES", handles_value, t.handles_samples[:],
+		scaled_peak(t.handles_samples[:], 1), app.pens.cpu, app.brushes.cpu_fill)
 }
 
 // Cards with values in bytes/thread counts need a peak-relative scale instead of
@@ -828,11 +839,18 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 	row_h := S(TASK_ROW_HEIGHT_DIP)
 	for row in 0..<geo.visible {
 		index := app.scroll + row
-		if index < 0 || index >= app.process_count {
+		if index < 0 || index >= app.task_row_count {
 			break
 		}
 		y := geo.list_top + i32(row)*row_h
-		draw_process_row(dc, &app.processes[index], geo.panel.left, geo.panel.right, y, row_h)
+		item := app.task_rows[index]
+		switch item.kind {
+		case .group:
+			draw_group_row(dc, &app.groups[item.index], geo.panel.left, geo.panel.right, y, row_h)
+		case .process:
+			draw_process_row(dc, &app.processes[item.index], geo.panel.left + S(24),
+				geo.panel.right, y, row_h)
+		}
 	}
 
 	draw_list_scrollbar(dc, geo.panel.right, geo.list_top, geo.list_bottom, geo.visible)
@@ -853,43 +871,7 @@ draw_process_row :: proc(dc: win.HDC, p: ^Process, left, right, y, row_h: i32) {
 	badge_size := S(28)
 	bx := left + margin + S(13)
 	by := y + (row_h - badge_size) / 2
-	badge_rect := win.RECT{bx, by, bx + badge_size, by + badge_size}
-
-	badge_brush := app.brushes.badge
-	if selected {
-		badge_brush = app.brushes.accent
-	}
-	fill_round(dc, badge_rect, badge_brush, app.pens.null, S(8))
-
-	initial: u16 = 0
-	for i in 0..<MAX_NAME_U16 {
-		c := p.name[i]
-		if c == 0 {
-			break
-		}
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-			initial = c
-			break
-		}
-	}
-	if initial == 0 {
-		initial = u16(p.name[0])
-	}
-	if initial >= 'a' && initial <= 'z' {
-		initial -= 32
-	}
-	if initial != 0 {
-		letter: [2]u16
-		letter[0] = initial
-		letter[1] = 0
-		letter_color := COL_TEXT
-		if selected {
-			letter_color = COL_BADGE_TEXT
-		}
-		draw_text_w(dc, win.wstring(raw_data(letter[:])), badge_rect.left, badge_rect.top,
-			badge_size, badge_size, app.fonts.badge, letter_color,
-			DT_CENTER | DT_VCENTER | DT_SINGLELINE)
-	}
+	draw_row_badge(dc, p.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
 
 	tx := bx + badge_size + S(11)
 	tw := right - margin - S(16) - tx
@@ -900,15 +882,7 @@ draw_process_row :: proc(dc: win.HDC, p: ^Process, left, right, y, row_h: i32) {
 	name := win.wstring(raw_data(p.name[:]))
 	name_w := tw
 	extra_buf: [32]u8
-	extra := ""
-	switch settings.sort_field {
-	case .gpu:
-		extra = fmt.bprintf(extra_buf[:], "GPU %d%%", i32(p.gpu_percent + 0.5))
-	case .disk:
-		factor, suffix := rate_scale(p.io_bps)
-		extra = fmt.bprintf(extra_buf[:], "I/O %.1f %s", p.io_bps/factor, suffix)
-	case .cpu, .memory:
-	}
+	extra := sort_extra_text(extra_buf[:], p.gpu_percent, p.io_bps)
 	if len(extra) > 0 {
 		extra_w := S(110)
 		if extra_w < tw/2 {
@@ -940,8 +914,123 @@ draw_process_row :: proc(dc: win.HDC, p: ^Process, left, right, y, row_h: i32) {
 		app.fonts.tiny, COL_MUTED, DT_RIGHT | DT_SINGLELINE)
 }
 
+sort_extra_text :: proc(buf: []u8, gpu: f32, io_bps: f64) -> string {
+	switch settings.sort_field {
+	case .gpu:
+		return fmt.bprintf(buf, "GPU %d%%", i32(gpu + 0.5))
+	case .disk:
+		factor, suffix := rate_scale(io_bps)
+		return fmt.bprintf(buf, "I/O %.1f %s", io_bps/factor, suffix)
+	case .cpu, .memory:
+	}
+	return ""
+}
+
+draw_row_badge :: proc(dc: win.HDC, name: [MAX_NAME_U16]u16, rect: win.RECT, highlighted: bool) {
+	brush := app.brushes.badge
+	letter_color := COL_TEXT
+	if highlighted {
+		brush = app.brushes.accent
+		letter_color = COL_BADGE_TEXT
+	}
+	fill_round(dc, rect, brush, app.pens.null, S(8))
+
+	initial: u16 = 0
+	for i in 0..<MAX_NAME_U16 {
+		c := name[i]
+		if c == 0 {
+			break
+		}
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			initial = c
+			break
+		}
+	}
+	if initial == 0 {
+		initial = name[0]
+	}
+	if initial >= 'a' && initial <= 'z' {
+		initial -= 32
+	}
+	if initial != 0 {
+		letter: [2]u16
+		letter[0] = initial
+		letter[1] = 0
+		draw_text_w(dc, win.wstring(raw_data(letter[:])), rect.left, rect.top,
+			rect.right - rect.left, rect.bottom - rect.top, app.fonts.badge, letter_color,
+			DT_CENTER | DT_VCENTER | DT_SINGLELINE)
+	}
+}
+
+draw_group_row :: proc(dc: win.HDC, g: ^Task_Group, left, right, y, row_h: i32) {
+	margin := S(12)
+	expanded := group_is_expanded(g.name)
+	selected := app.has_selection && app.group_selected && same_task_name(g.name, app.selected_group)
+
+	if selected {
+		row_rect := win.RECT{left + margin, y + 1, right - margin, y + row_h - S(2)}
+		fill_round(dc, row_rect, app.brushes.selected, app.pens.null, S(9))
+	}
+
+	chevron := "▸"
+	if expanded {
+		chevron = "▾"
+	}
+	draw_text(dc, chevron, left + S(14), y, S(16), row_h,
+		app.fonts.small, COL_MUTED, DT_CENTER | DT_VCENTER | DT_SINGLELINE)
+
+	badge_size := S(28)
+	bx := left + S(36)
+	by := y + (row_h - badge_size) / 2
+	draw_row_badge(dc, g.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
+
+	tx := bx + badge_size + S(11)
+	tw := right - margin - S(16) - tx
+	if tw < S(20) {
+		return
+	}
+
+	extra_buf: [32]u8
+	extra := sort_extra_text(extra_buf[:], g.gpu_percent, g.io_bps)
+	name_w := tw
+	if len(extra) > 0 {
+		extra_w := S(110)
+		if extra_w < tw/2 {
+			name_w = tw - extra_w - S(8)
+			draw_text(dc, extra, tx + tw - extra_w, y + S(5), extra_w, S(16),
+				app.fonts.tiny, COL_MUTED, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS)
+		}
+	}
+
+	draw_text_w(dc, win.wstring(raw_data(g.name[:])), tx, y + S(6), name_w, S(21),
+		app.fonts.stat, COL_TEXT,
+		DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
+
+	sub_buf: [32]u8
+	sub := fmt.bprintf(sub_buf[:], "%d processes", g.count)
+	if g.count == 1 {
+		sub = "1 process"
+	}
+	metric_w := S(100)
+	left_w := tw - metric_w
+	if left_w < S(40) {
+		left_w = tw
+	}
+	draw_text(dc, sub, tx, y + S(27), left_w, S(16), app.fonts.tiny, COL_MUTED,
+		DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS)
+
+	mem_buf: [32]u8
+	cpu_buf: [16]u8
+	right_buf: [64]u8
+	mem_text := format_memory(mem_buf[:], g.working_set)
+	cpu_text := fmt.bprintf(cpu_buf[:], "%d%%", i32(g.cpu_percent + 0.5))
+	metrics := fmt.bprintf(right_buf[:], "%s · %s", mem_text, cpu_text)
+	draw_text(dc, metrics, tx + tw - metric_w, y + S(27), metric_w, S(16),
+		app.fonts.tiny, COL_MUTED, DT_RIGHT | DT_SINGLELINE)
+}
+
 draw_list_scrollbar :: proc(dc: win.HDC, panel_right, list_top, list_bottom: i32, visible: int) {
-	if visible <= 0 || app.process_count <= visible {
+	if visible <= 0 || app.task_row_count <= visible {
 		return
 	}
 	track_x := panel_right - S(10)
@@ -955,8 +1044,8 @@ draw_list_scrollbar :: proc(dc: win.HDC, panel_right, list_top, list_bottom: i32
 	_ = win.FillRect(dc, &track_rect, app.brushes.track)
 
 	track_h := bottom - top
-	thumb_h := max(S(26), track_h * i32(visible) / i32(app.process_count))
-	max_scroll := max(app.process_count - visible, 1)
+	thumb_h := max(S(26), track_h * i32(visible) / i32(app.task_row_count))
+	max_scroll := max(app.task_row_count - visible, 1)
 	travel := track_h - thumb_h
 	if travel < 0 {
 		travel = 0

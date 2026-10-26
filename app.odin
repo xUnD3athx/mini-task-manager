@@ -7,6 +7,8 @@ import win "core:sys/windows"
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
+MAX_GROUPS         :: 512
+MAX_TASK_ROWS      :: MAX_PROCESSES + MAX_GROUPS
 SAMPLE_COUNT       :: 120
 MAX_CORES          :: 128
 MAX_NET_INTERFACES :: 512
@@ -288,15 +290,45 @@ is_virtual_adapter :: proc(descr: []u8) -> bool {
 }
 
 Process :: struct {
-	pid:         u32,
-	threads:     u32,
+	pid:            u32,
+	threads:        u32,
+	name:           [MAX_NAME_U16]u16,
+	working_set:    u64,
+	cpu_time:       u64,
+	cpu_percent:    f32,
+	gpu_percent:    f32,
+	handles:        u32,
+	io_read_bps:    f64,
+	io_write_bps:   f64,
+	io_bps:         f64,
+	io_read_total:  u64,
+	io_write_total: u64,
+}
+
+// Processes that share an executable name are shown as one application in the
+// tree, with aggregated metrics on the parent row.
+Task_Group :: struct {
 	name:        [MAX_NAME_U16]u16,
-	working_set: u64,
-	cpu_time:    u64,
+	count:       int,
 	cpu_percent: f32,
+	working_set: u64,
 	gpu_percent: f32,
 	io_bps:      f64,
-	io_total:    u64,
+}
+
+List_Row_Kind :: enum {
+	group,
+	process,
+}
+
+List_Row :: struct {
+	kind:  List_Row_Kind,
+	index: int,
+}
+
+Expand_State :: struct {
+	name:     [MAX_NAME_U16]u16,
+	expanded: bool,
 }
 
 // Per-process GPU usage gathered from the GPU Engine counter instances, which
@@ -308,25 +340,27 @@ Gpu_Pid_Usage :: struct {
 	usage: f32,
 }
 
-// Per-metrics of the task selected in the drawer, refreshed independently of
-// the process list so the detail page can show IO rates and GPU usage.
+// Per-metrics of the current selection (a process or a whole application).
 Task_Metrics :: struct {
-	pid:              u32,
-	handles:          u32,
-	gpu:              f32,
-	read_bps:         f64,
-	write_bps:        f64,
-	prev_read:        u64,
-	prev_write:       u64,
-	prev_ms:          u64,
-	have_io_prev:     bool,
-	cpu_samples:      [SAMPLE_COUNT]f32,
-	mem_samples:      [SAMPLE_COUNT]f32,
-	gpu_samples:      [SAMPLE_COUNT]f32,
-	read_samples:     [SAMPLE_COUNT]f32,
-	write_samples:    [SAMPLE_COUNT]f32,
-	threads_samples:  [SAMPLE_COUNT]f32,
-	handles_samples:  [SAMPLE_COUNT]f32,
+	pid:             u32,
+	group_mode:      bool,
+	group:           [MAX_NAME_U16]u16,
+	count:           int,
+	cpu:             f32,
+	mem_bytes:       u64,
+	gpu:             f32,
+	read_bps:        f64,
+	write_bps:       f64,
+	threads:         u32,
+	handles:         u32,
+	cpu_time:        u64,
+	cpu_samples:     [SAMPLE_COUNT]f32,
+	mem_samples:     [SAMPLE_COUNT]f32,
+	gpu_samples:     [SAMPLE_COUNT]f32,
+	read_samples:    [SAMPLE_COUNT]f32,
+	write_samples:   [SAMPLE_COUNT]f32,
+	threads_samples: [SAMPLE_COUNT]f32,
+	handles_samples: [SAMPLE_COUNT]f32,
 }
 
 Fonts :: struct {
@@ -367,7 +401,15 @@ App :: struct {
 
 	processes:       [MAX_PROCESSES]Process,
 	process_count:   int,
+	groups:          [MAX_GROUPS]Task_Group,
+	group_count:     int,
+	task_rows:       [MAX_TASK_ROWS]List_Row,
+	task_row_count:  int,
+	expand_state:    [MAX_GROUPS]Expand_State,
+	expand_count:    int,
 	selected_pid:    u32,
+	selected_group:  [MAX_NAME_U16]u16,
+	group_selected:  bool,
 	has_selection:   bool,
 	scroll:          int,
 	last_process_ms: u64,
@@ -720,7 +762,7 @@ task_detail_layout :: proc(rect: win.RECT) -> Task_Detail_Layout {
 
 clamp_scroll :: proc() {
 	visible := visible_process_rows()
-	max_scroll := max(app.process_count - visible, 0)
+	max_scroll := max(app.task_row_count - visible, 0)
 	if app.scroll > max_scroll {
 		app.scroll = max_scroll
 	}
@@ -843,10 +885,22 @@ lower_wide :: proc(c: u16) -> u16 {
 	return c
 }
 
-process_name_less :: proc(a, b: ^Process) -> bool {
+same_task_name :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
 	for i in 0..<MAX_NAME_U16 {
-		ca := a.name[i]
-		cb := b.name[i]
+		if a[i] != b[i] {
+			return false
+		}
+		if a[i] == 0 {
+			return true
+		}
+	}
+	return true
+}
+
+task_name_less :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
+	for i in 0..<MAX_NAME_U16 {
+		ca := a[i]
+		cb := b[i]
 		if ca == 0 {
 			return cb != 0
 		}
@@ -860,6 +914,10 @@ process_name_less :: proc(a, b: ^Process) -> bool {
 		}
 	}
 	return false
+}
+
+process_name_less :: proc(a, b: ^Process) -> bool {
+	return task_name_less(a.name, b.name)
 }
 
 process_order_less :: proc(a, b: ^Process) -> bool {
@@ -907,6 +965,126 @@ sort_processes :: proc(list: []Process) {
 		}
 		list[j+1] = p
 	}
+}
+
+group_order_less :: proc(a, b: ^Task_Group) -> bool {
+	switch settings.sort_field {
+	case .cpu:
+		if a.cpu_percent != b.cpu_percent {
+			if settings.sort_desc {
+				return a.cpu_percent > b.cpu_percent
+			}
+			return a.cpu_percent < b.cpu_percent
+		}
+	case .memory:
+		if a.working_set != b.working_set {
+			if settings.sort_desc {
+				return a.working_set > b.working_set
+			}
+			return a.working_set < b.working_set
+		}
+	case .gpu:
+		if a.gpu_percent != b.gpu_percent {
+			if settings.sort_desc {
+				return a.gpu_percent > b.gpu_percent
+			}
+			return a.gpu_percent < b.gpu_percent
+		}
+	case .disk:
+		if a.io_bps != b.io_bps {
+			if settings.sort_desc {
+				return a.io_bps > b.io_bps
+			}
+			return a.io_bps < b.io_bps
+		}
+	}
+	return task_name_less(a.name, b.name)
+}
+
+group_is_expanded :: proc(name: [MAX_NAME_U16]u16) -> bool {
+	for i in 0..<app.expand_count {
+		if same_task_name(app.expand_state[i].name, name) {
+			return app.expand_state[i].expanded
+		}
+	}
+	return false
+}
+
+group_set_expanded :: proc(name: [MAX_NAME_U16]u16, expanded: bool) {
+	for i in 0..<app.expand_count {
+		if same_task_name(app.expand_state[i].name, name) {
+			app.expand_state[i].expanded = expanded
+			return
+		}
+	}
+	if app.expand_count < MAX_GROUPS {
+		app.expand_state[app.expand_count] = Expand_State{name = name, expanded = expanded}
+		app.expand_count += 1
+	}
+}
+
+append_task_row :: proc(kind: List_Row_Kind, index: int) {
+	if app.task_row_count < MAX_TASK_ROWS {
+		app.task_rows[app.task_row_count] = List_Row{kind = kind, index = index}
+		app.task_row_count += 1
+	}
+}
+
+rebuild_task_rows :: proc() {
+	app.task_row_count = 0
+	for gi in 0..<app.group_count {
+		g := &app.groups[gi]
+		append_task_row(.group, gi)
+		if !group_is_expanded(g.name) {
+			continue
+		}
+		for pi in 0..<app.process_count {
+			if same_task_name(app.processes[pi].name, g.name) {
+				append_task_row(.process, pi)
+			}
+		}
+	}
+}
+
+build_task_groups :: proc() {
+	app.group_count = 0
+	for pi in 0..<app.process_count {
+		p := &app.processes[pi]
+		gi := -1
+		for j in 0..<app.group_count {
+			if same_task_name(app.groups[j].name, p.name) {
+				gi = j
+				break
+			}
+		}
+		if gi < 0 {
+			if app.group_count >= MAX_GROUPS {
+				continue
+			}
+			gi = app.group_count
+			app.groups[gi] = Task_Group{name = p.name}
+			app.group_count += 1
+		}
+
+		g := &app.groups[gi]
+		g.count += 1
+		g.cpu_percent += p.cpu_percent
+		g.working_set += p.working_set
+		g.gpu_percent += p.gpu_percent
+		g.io_bps += p.io_bps
+	}
+
+	for i in 1..<app.group_count {
+		g := app.groups[i]
+		j := i - 1
+		for j >= 0 && group_order_less(&g, &app.groups[j]) {
+			app.groups[j+1] = app.groups[j]
+			j -= 1
+		}
+		app.groups[j+1] = g
+	}
+
+	rebuild_task_rows()
 }
 
 task_sort_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {
@@ -1032,7 +1210,13 @@ refresh_processes :: proc() {
 
 			io: Io_Counters
 			if GetProcessIoCounters(handle, &io) {
-				p.io_total = io.read_bytes + io.write_bytes
+				p.io_read_total = io.read_bytes
+				p.io_write_total = io.write_bytes
+			}
+
+			handles: u32
+			if GetProcessHandleCount(handle, &handles) {
+				p.handles = handles
 			}
 			_ = win.CloseHandle(handle)
 		}
@@ -1050,9 +1234,13 @@ refresh_processes :: proc() {
 				}
 				p.cpu_percent = pct
 			}
-			if p.io_total >= old.io_total {
-				p.io_bps = f64(p.io_total - old.io_total) * 1000.0 / f64(elapsed_ms)
+			if p.io_read_total >= old.io_read_total {
+				p.io_read_bps = f64(p.io_read_total - old.io_read_total) * 1000.0 / f64(elapsed_ms)
 			}
+			if p.io_write_total >= old.io_write_total {
+				p.io_write_bps = f64(p.io_write_total - old.io_write_total) * 1000.0 / f64(elapsed_ms)
+			}
+			p.io_bps = p.io_read_bps + p.io_write_bps
 		}
 
 		p.gpu_percent = gpu_usage_for_pid(p.pid)
@@ -1070,18 +1258,25 @@ refresh_processes :: proc() {
 	if app.has_selection {
 		alive := false
 		for i in 0..<count {
-			if app.processes[i].pid == app.selected_pid {
+			if app.group_selected {
+				if same_task_name(app.processes[i].name, app.selected_group) {
+					alive = true
+					break
+				}
+			} else if app.processes[i].pid == app.selected_pid {
 				alive = true
 				break
 			}
 		}
 		if !alive {
 			app.has_selection = false
+			app.group_selected = false
 			app.task = {}
 			refresh_window_preview()
 		}
 	}
 
+	build_task_groups()
 	clamp_scroll()
 }
 
@@ -1095,65 +1290,72 @@ push_sample :: proc(samples: []f32, v: f32) {
 	samples[len(samples)-1] = v
 }
 
-update_task_metrics :: proc(now: u64) {
+update_task_metrics :: proc() {
 	if !app.has_selection {
-		if app.task.pid != 0 {
+		if app.task.pid != 0 || app.task.group_mode {
 			app.task = {}
 		}
 		return
 	}
-	if app.task.pid != app.selected_pid {
+
+	// Start a fresh history when the selection changes.
+	if app.group_selected {
+		if !app.task.group_mode || !same_task_name(app.task.group, app.selected_group) {
+			app.task = Task_Metrics{group_mode = true, group = app.selected_group}
+		}
+	} else if app.task.group_mode || app.task.pid != app.selected_pid {
 		app.task = Task_Metrics{pid = app.selected_pid}
 	}
 
-	handle := win.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, win.FALSE, app.selected_pid)
-	if handle != nil {
-		handles: u32
-		if GetProcessHandleCount(handle, &handles) {
-			app.task.handles = handles
-		}
+	t := &app.task
+	t.cpu = 0
+	t.mem_bytes = 0
+	t.gpu = 0
+	t.read_bps = 0
+	t.write_bps = 0
+	t.threads = 0
+	t.handles = 0
+	t.cpu_time = 0
+	t.count = 0
 
-		io: Io_Counters
-		if GetProcessIoCounters(handle, &io) {
-			if app.task.have_io_prev && now > app.task.prev_ms {
-				seconds := f64(now - app.task.prev_ms) / 1000.0
-				if seconds > 0 {
-					read_delta: u64 = 0
-					if io.read_bytes >= app.task.prev_read {
-						read_delta = io.read_bytes - app.task.prev_read
-					}
-					write_delta: u64 = 0
-					if io.write_bytes >= app.task.prev_write {
-						write_delta = io.write_bytes - app.task.prev_write
-					}
-					app.task.read_bps = f64(read_delta) / seconds
-					app.task.write_bps = f64(write_delta) / seconds
-				}
+	if t.group_mode {
+		for i in 0..<app.process_count {
+			p := &app.processes[i]
+			if !same_task_name(p.name, t.group) {
+				continue
 			}
-			app.task.prev_read = io.read_bytes
-			app.task.prev_write = io.write_bytes
-			app.task.prev_ms = now
-			app.task.have_io_prev = true
+			t.count += 1
+			t.cpu += p.cpu_percent
+			t.mem_bytes += p.working_set
+			t.gpu += p.gpu_percent
+			t.read_bps += p.io_read_bps
+			t.write_bps += p.io_write_bps
+			t.threads += p.threads
+			t.handles += p.handles
+			t.cpu_time += p.cpu_time
 		}
-		win.CloseHandle(handle)
+	} else if p, found := find_process(t.pid); found {
+		t.count = 1
+		t.cpu = p.cpu_percent
+		t.mem_bytes = p.working_set
+		t.gpu = gpu_usage_for_pid(p.pid)
+		t.read_bps = p.io_read_bps
+		t.write_bps = p.io_write_bps
+		t.threads = p.threads
+		t.handles = p.handles
+		t.cpu_time = p.cpu_time
+	}
+	if t.gpu > 100 {
+		t.gpu = 100
 	}
 
-	cpu: f32 = 0
-	memory_mb: f32 = 0
-	threads: f32 = 0
-	if p, found := find_process(app.selected_pid); found {
-		cpu = p.cpu_percent
-		memory_mb = f32(f64(p.working_set) / (1024.0*1024.0))
-		threads = f32(p.threads)
-	}
-
-	push_sample(app.task.cpu_samples[:], cpu)
-	push_sample(app.task.mem_samples[:], memory_mb)
-	push_sample(app.task.threads_samples[:], threads)
-	push_sample(app.task.handles_samples[:], f32(app.task.handles))
-	push_sample(app.task.gpu_samples[:], app.task.gpu)
-	push_sample(app.task.read_samples[:], f32(app.task.read_bps))
-	push_sample(app.task.write_samples[:], f32(app.task.write_bps))
+	push_sample(t.cpu_samples[:], t.cpu)
+	push_sample(t.mem_samples[:], f32(f64(t.mem_bytes) / (1024.0*1024.0)))
+	push_sample(t.threads_samples[:], f32(t.threads))
+	push_sample(t.handles_samples[:], f32(t.handles))
+	push_sample(t.gpu_samples[:], t.gpu)
+	push_sample(t.read_samples[:], f32(t.read_bps))
+	push_sample(t.write_samples[:], f32(t.write_bps))
 }
 
 push_cpu_sample :: proc(v: f32) {
@@ -1358,9 +1560,6 @@ update_pdh_rates :: proc() {
 			}
 			app.gpu = f32(overall)
 			app.gpu_ok = true
-			if app.has_selection {
-				app.task.gpu = gpu_usage_for_pid(app.selected_pid)
-			}
 		}
 	}
 
@@ -1538,7 +1737,7 @@ update_metrics :: proc() {
 	push_gpu_sample(app.gpu)
 
 	update_network_rates(now)
-	update_task_metrics(now)
+	update_task_metrics()
 
 	app.uptime_secs = now / 1000
 }
@@ -1672,6 +1871,7 @@ settings_set_sort :: proc(field: Sort_Field) {
 		settings.sort_desc = true
 	}
 	sort_processes(app.processes[:app.process_count])
+	build_task_groups()
 	save_settings()
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }

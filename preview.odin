@@ -18,9 +18,19 @@ Window_Preview :: struct {
 }
 
 Main_Window_Find :: struct {
-	pid:       u32,
+	pids:      [MAX_PROCESSES]u32,
+	pid_count: int,
 	best:      win.HWND,
 	best_area: i64,
+}
+
+pid_in_find :: proc(find: ^Main_Window_Find, pid: u32) -> bool {
+	for i in 0..<find.pid_count {
+		if find.pids[i] == pid {
+			return true
+		}
+	}
+	return false
 }
 
 window_class_is_shell :: proc(hwnd: win.HWND) -> bool {
@@ -42,7 +52,7 @@ find_main_window_callback :: proc "system" (hwnd: win.HWND, lparam: win.LPARAM) 
 
 	pid: u32
 	_ = win.GetWindowThreadProcessId(hwnd, &pid)
-	if pid != find.pid {
+	if !pid_in_find(find, pid) {
 		return win.TRUE
 	}
 	if win.IsWindowVisible(hwnd) == win.FALSE {
@@ -88,13 +98,42 @@ find_main_window_callback :: proc "system" (hwnd: win.HWND, lparam: win.LPARAM) 
 	return win.TRUE
 }
 
+find_window_for_pids :: proc(pids: []u32) -> win.HWND {
+	if len(pids) == 0 {
+		return nil
+	}
+	find := Main_Window_Find{}
+	find.pid_count = min(len(pids), len(find.pids))
+	for i in 0..<find.pid_count {
+		find.pids[i] = pids[i]
+	}
+	_ = win.EnumWindows(find_main_window_callback, win.LPARAM(uintptr(&find)))
+	return find.best
+}
+
 find_main_window :: proc(pid: u32) -> win.HWND {
 	if pid == 0 {
 		return nil
 	}
-	find := Main_Window_Find{pid = pid}
-	_ = win.EnumWindows(find_main_window_callback, win.LPARAM(uintptr(&find)))
-	return find.best
+	pids: [1]u32 = {pid}
+	return find_window_for_pids(pids[:])
+}
+
+// The window shown for an application is the largest one owned by any of its
+// processes, so renderer/helper tasks don't hide the main window.
+find_group_window :: proc(name: [MAX_NAME_U16]u16) -> win.HWND {
+	pids: [MAX_PROCESSES]u32
+	count := 0
+	for i in 0..<app.process_count {
+		if count >= len(pids) {
+			break
+		}
+		if same_task_name(app.processes[i].name, name) {
+			pids[count] = app.processes[i].pid
+			count += 1
+		}
+	}
+	return find_window_for_pids(pids[:count])
 }
 
 refresh_window_preview :: proc() {
@@ -102,7 +141,11 @@ refresh_window_preview :: proc() {
 
 	hwnd: win.HWND = nil
 	if wanted {
-		hwnd = find_main_window(app.selected_pid)
+		if app.group_selected {
+			hwnd = find_group_window(app.selected_group)
+		} else {
+			hwnd = find_main_window(app.selected_pid)
+		}
 	}
 
 	if hwnd != nil && hwnd == app.preview.hwnd && app.preview.thumbnail != nil {
