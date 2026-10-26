@@ -204,7 +204,62 @@ wrapped_delta_u32 :: proc(cur, prev: u32) -> u32 {
 	if cur >= prev {
 		return cur - prev
 	}
-	return (0xFFFF_FFFF - prev) + cur + 1
+	// The counters are 32-bit and reset to zero when the adapter is
+	// re-initialized (link down, driver reload). A real wrap only steps back
+	// by the bytes moved since the previous sample, so the old value must be
+	// close to the upper bound. Anything else is a reset and carries no
+	// measurable traffic.
+	if prev >= 0xFFFF_FFFF - u32(1 << 30) {
+		return (0xFFFF_FFFF - prev) + cur + 1
+	}
+	return 0
+}
+
+contains_ascii_ci :: proc(haystack: []u8, needle: string) -> bool {
+	if len(needle) == 0 || len(haystack) < len(needle) {
+		return false
+	}
+	for i in 0 ..= len(haystack) - len(needle) {
+		match := true
+		for j in 0 ..< len(needle) {
+			c := haystack[i + j]
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
+// Hypervisor switches, VPN clients and loopback shims stay "connected" and keep
+// moving local traffic even when the machine has no network at all. Ignore them
+// so the readout reflects traffic on real uplink adapters.
+is_virtual_adapter :: proc(descr: []u8) -> bool {
+	keywords := [?]string{
+		"virtual",
+		"vpn",
+		"tunnel",
+		"loopback",
+		"pseudo",
+		"tap-",
+		"npcap",
+		"wintun",
+		"wireguard",
+		"wsl",
+	}
+	for keyword in keywords {
+		if contains_ascii_ci(descr, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 Process :: struct {
@@ -302,6 +357,7 @@ App :: struct {
 	net_last_ms:    u64,
 	net_have_prev:  bool,
 	net_ok:         bool,
+	net_online:     bool,
 	net_table:      Mib_If_Table,
 
 	cpu_samples: [SAMPLE_COUNT]f32,
@@ -869,6 +925,12 @@ update_network_rates :: proc(now: u64) {
 	size := u32(size_of(app.net_table))
 	status := GetIfTable(rawptr(&app.net_table), &size, win.FALSE)
 	if status != 0 {
+		app.net_ok = false
+		app.net_online = false
+		app.net_in_bps = 0
+		app.net_out_bps = 0
+		app.net_have_prev = false
+		app.net_prev_count = 0
 		return
 	}
 	app.net_ok = true
@@ -877,6 +939,7 @@ update_network_rates :: proc(now: u64) {
 	next_count := 0
 	max_in: f64 = 0
 	max_out: f64 = 0
+	online := false
 	has_prev := app.net_have_prev && now > app.net_last_ms
 	seconds := f64(now - app.net_last_ms) / 1000.0
 
@@ -886,6 +949,25 @@ update_network_rates :: proc(now: u64) {
 		if row.type_ != IF_TYPE_ETHERNET_CSMACD && row.type_ != IF_TYPE_IEEE80211 {
 			continue
 		}
+		// Adapters without media (WAN Miniports, unplugged NICs) still show up as
+		// connected but never report a link speed.
+		if row.speed == 0 {
+			continue
+		}
+		// Only adapters that are enabled and actually attached to a network can
+		// move traffic. Disconnected adapters keep their last counters around,
+		// so including them keeps reporting stale rates while offline.
+		if row.admin_status != IF_ADMIN_STATUS_UP {
+			continue
+		}
+		if row.oper_status != IF_OPER_STATUS_CONNECTED && row.oper_status != IF_OPER_STATUS_OPERATIONAL {
+			continue
+		}
+		descr_len := min(int(row.descr_len), len(row.descr))
+		if is_virtual_adapter(row.descr[:descr_len]) {
+			continue
+		}
+		online = true
 
 		if has_prev && seconds > 0 {
 			for j in 0..<app.net_prev_count {
@@ -896,7 +978,7 @@ update_network_rates :: proc(now: u64) {
 				delta_in := wrapped_delta_u32(row.in_octets, prev.bytes_in)
 				delta_out := wrapped_delta_u32(row.out_octets, prev.bytes_out)
 				limit := f64(row.speed) / 8.0 * seconds * 2.0 + 1_000_000.0
-				if row.speed == 0 || (f64(delta_in) <= limit && f64(delta_out) <= limit) {
+				if f64(delta_in) <= limit && f64(delta_out) <= limit {
 					in_rate := f64(delta_in) / seconds
 					out_rate := f64(delta_out) / seconds
 					if in_rate > max_in {
@@ -921,7 +1003,11 @@ update_network_rates :: proc(now: u64) {
 	}
 	app.net_prev_count = next_count
 
-	if has_prev && seconds > 0 {
+	app.net_online = online
+	if !online {
+		app.net_in_bps = 0
+		app.net_out_bps = 0
+	} else if has_prev && seconds > 0 {
 		app.net_in_bps = max(max_in, 0)
 		app.net_out_bps = max(max_out, 0)
 	}

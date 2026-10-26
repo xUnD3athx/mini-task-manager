@@ -149,6 +149,10 @@ IF_TYPE_ETHERNET_CSMACD :: 6
 IF_TYPE_IEEE80211       :: 71
 MAX_NET_ROWS            :: 150
 
+IF_ADMIN_STATUS_UP         :: 1
+IF_OPER_STATUS_CONNECTED   :: 4
+IF_OPER_STATUS_OPERATIONAL :: 5
+
 Mib_If_Row :: struct {
 	name:              [256]u16,
 	index:             u32,

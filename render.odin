@@ -386,10 +386,14 @@ draw_bar_network :: proc(dc: win.HDC, x, w: i32) {
 	value_buf: [32]u8
 	sub_buf: [48]u8
 	if app.net_ok {
-		total := app.net_in_bps + app.net_out_bps
-		factor, suffix := rate_scale(total)
-		value = fmt.bprintf(value_buf[:], "%.1f %s", total/factor, suffix)
-		sub = fmt.bprintf(sub_buf[:], "↓ %.1f · ↑ %.1f", app.net_in_bps/factor, app.net_out_bps/factor)
+		if !app.net_online {
+			sub = "offline"
+		} else {
+			total := app.net_in_bps + app.net_out_bps
+			factor, suffix := rate_scale(total)
+			value = fmt.bprintf(value_buf[:], "%.1f %s", total/factor, suffix)
+			sub = fmt.bprintf(sub_buf[:], "↓ %.1f · ↑ %.1f", app.net_in_bps/factor, app.net_out_bps/factor)
+		}
 	}
 	draw_bar_value(dc, x, w, value, sub)
 }
@@ -961,10 +965,14 @@ draw_stats_row :: proc(dc: win.HDC, rect: win.RECT) {
 		net_value := "—"
 		net_sub := "unavailable"
 		if app.net_ok {
-			net_total := app.net_in_bps + app.net_out_bps
-			factor, suffix := rate_scale(net_total)
-			net_value = fmt.bprintf(net_value_buf[:], "%.1f %s", net_total/factor, suffix)
-			net_sub = fmt.bprintf(net_sub_buf[:], "↓ %.1f · ↑ %.1f", app.net_in_bps/factor, app.net_out_bps/factor)
+			if !app.net_online {
+				net_sub = "offline"
+			} else {
+				net_total := app.net_in_bps + app.net_out_bps
+				factor, suffix := rate_scale(net_total)
+				net_value = fmt.bprintf(net_value_buf[:], "%.1f %s", net_total/factor, suffix)
+				net_sub = fmt.bprintf(net_sub_buf[:], "↓ %.1f · ↑ %.1f", app.net_in_bps/factor, app.net_out_bps/factor)
+			}
 		}
 		specs[count] = Stat_Spec{"NETWORK", net_value, net_sub}
 		count += 1
