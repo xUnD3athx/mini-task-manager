@@ -1062,7 +1062,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 
 	draw_text(dc, "Settings", layout.outer.left + S(24), layout.outer.top + S(16),
 		S(240), S(30), app.fonts.title, COL_TEXT, DT_LEFT | DT_VCENTER | DT_SINGLELINE)
-	draw_text(dc, "Modules, colors and bar theme", layout.outer.left + S(24), layout.outer.top + S(44),
+	draw_text(dc, "Modules, colors, refresh and theme", layout.outer.left + S(24), layout.outer.top + S(44),
 		S(420), S(16), app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
 
 	fill_round(dc, layout.reset, app.brushes.badge, app.pens.border, S(8))
@@ -1208,6 +1208,73 @@ draw_settings_view :: proc(dc: win.HDC) {
 			draw_text(dc, "✓", preview.right - S(40), preview.bottom - S(40), S(20), S(20),
 				app.fonts.small, COL_TEXT, DT_CENTER | DT_VCENTER | DT_SINGLELINE)
 		}
+	}
+
+	refresh_y := settings_refresh_label_y(layout)
+	draw_text(dc, "REFRESH", layout.appearance.left, refresh_y,
+		layout.appearance.right - layout.appearance.left, S(14),
+		app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+
+	history_buf: [32]u8
+	draw_text(dc, refresh_history_label(history_buf[:], settings.refresh_ms),
+		layout.appearance.left, refresh_y, layout.appearance.right - layout.appearance.left, S(14),
+		app.fonts.tiny, COL_MUTED, DT_RIGHT | DT_SINGLELINE)
+
+	refresh_options := REFRESH_OPTIONS
+	for i in 0..<len(refresh_options) {
+		option := refresh_options[i]
+		chip := settings_refresh_chip_rect(layout, i)
+		selected := false
+		label := ""
+		label_buf: [16]u8
+		if option < 0 {
+			selected = is_refresh_custom()
+			label = "CUSTOM"
+		} else {
+			selected = settings.refresh_ms == option && !is_refresh_custom()
+			label = refresh_label(label_buf[:], option)
+		}
+
+		brush := app.brushes.badge
+		text_color := COL_TEXT
+		if selected {
+			brush = app.brushes.accent
+			text_color = COL_BADGE_TEXT
+		}
+		fill_round(dc, chip, brush, app.pens.border, S(7))
+
+		draw_text(dc, label, chip.left, chip.top,
+			chip.right - chip.left, chip.bottom - chip.top, app.fonts.tiny, text_color,
+			DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS)
+	}
+
+	if is_refresh_custom() {
+		row_y := settings_refresh_row_y(layout)
+		draw_text(dc, "CUSTOM", layout.appearance.left, row_y + S(5), S(66), S(14),
+			app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+
+		minus := settings_refresh_minus_rect(layout)
+		plus := settings_refresh_plus_rect(layout)
+		value_rect := settings_refresh_value_rect(layout)
+		draw_page_button(dc, minus, "-", settings.refresh_ms > REFRESH_MIN_MS)
+		draw_page_button(dc, plus, "+", settings.refresh_ms < REFRESH_MAX_MS)
+
+		fill_round(dc, value_rect, app.brushes.badge, app.pens.border, S(7))
+
+		text_buf: [16]u8
+		text := ""
+		if app.refresh_edit {
+			text = fmt.bprintf(text_buf[:], "%s|", string(app.refresh_edit_buf[:app.refresh_edit_len]))
+			underline := win.RECT{value_rect.left + S(6), value_rect.bottom - S(3),
+				value_rect.right - S(6), value_rect.bottom - S(1)}
+			_ = win.FillRect(dc, &underline, app.brushes.accent)
+		} else {
+			text = fmt.bprintf(text_buf[:], "%d ms", settings.refresh_ms)
+		}
+
+		draw_text(dc, text, value_rect.left, value_rect.top,
+			value_rect.right - value_rect.left, value_rect.bottom - value_rect.top,
+			app.fonts.small, COL_TEXT, DT_CENTER | DT_VCENTER | DT_SINGLELINE)
 	}
 
 	draw_text(dc, "Changes are saved automatically", layout.outer.right - S(244), layout.outer.bottom - S(30),

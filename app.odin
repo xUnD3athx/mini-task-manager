@@ -124,6 +124,9 @@ Settings :: struct {
 	cores_custom_mode: bool,
 	sort_field:        Sort_Field,
 	sort_desc:         bool,
+	refresh_ms:        int,
+	refresh_custom:    int,
+	refresh_custom_mode: bool,
 }
 
 Sort_Field :: enum {
@@ -138,6 +141,17 @@ SORT_FIELD_LABELS :: [4]string{"CPU", "MEM", "GPU", "DISK"}
 // 0 means "all cores" (Max); -1 is the custom entry, which uses
 // settings.cores_custom instead of a fixed value.
 CORE_PAGE_OPTIONS :: [6]int{4, 6, 8, 16, 0, -1}
+
+// Sample interval choices in milliseconds; -1 is the custom entry. The curves
+// keep SAMPLE_COUNT samples, so the visible history is refresh_ms * SAMPLE_COUNT.
+REFRESH_OPTIONS :: [6]int{250, 500, 1000, 2000, 5000, -1}
+REFRESH_MIN_MS  :: 100
+REFRESH_MAX_MS  :: 10000
+REFRESH_STEP_MS :: 100
+
+// The process list is re-enumerated on its own cadence so a fast sample
+// interval does not multiply the cost of the Toolhelp snapshot walk.
+PROCESS_REFRESH_MS :: 2000
 
 settings: Settings
 
@@ -160,6 +174,8 @@ default_settings :: proc() -> Settings {
 		cores_custom = 5,
 		sort_field = .cpu,
 		sort_desc = true,
+		refresh_ms = 1000,
+		refresh_custom = 750,
 	}
 }
 
@@ -385,6 +401,10 @@ App :: struct {
 	drawer_h:           i32,
 	view:               Drawer_View,
 	color_dialog_open:  bool,
+	refresh_edit:       bool,
+	refresh_edit_buf:   [8]u8,
+	refresh_edit_len:   int,
+	refresh_edit_replace: bool,
 	bar_rect:           win.RECT,
 	appbar_registered:  bool,
 	appbar_moving:      bool,
@@ -463,7 +483,6 @@ App :: struct {
 
 	last_idle, last_kernel, last_user: u64,
 	have_last: bool,
-	tick:      u64,
 }
 
 app: App
@@ -865,8 +884,47 @@ settings_custom_rect :: proc(layout: Settings_Layout, role: int) -> win.RECT {
 }
 
 settings_theme_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
-	y := layout.appearance.top + S(42) + i32(index)*(S(80) + S(12))
-	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + S(80)}
+	y := layout.appearance.top + S(42) + i32(index)*(S(76) + S(10))
+	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + S(76)}
+}
+
+settings_refresh_label_y :: proc(layout: Settings_Layout) -> i32 {
+	last := settings_theme_rect(layout, len(THEMES)-1)
+	return last.bottom + S(14)
+}
+
+settings_refresh_chip_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
+	count := len(REFRESH_OPTIONS)
+	gap := S(6)
+	avail := layout.appearance.right - layout.appearance.left
+	w := clamp((avail - gap*i32(count-1)) / i32(count), S(44), S(64))
+	h := S(26)
+	x := layout.appearance.left + i32(index)*(w + gap)
+	y := settings_refresh_label_y(layout) + S(18)
+	return win.RECT{x, y, x + w, y + h}
+}
+
+settings_refresh_row_y :: proc(layout: Settings_Layout) -> i32 {
+	chip := settings_refresh_chip_rect(layout, 0)
+	return chip.bottom + S(6)
+}
+
+settings_refresh_minus_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	y := settings_refresh_row_y(layout)
+	x := layout.appearance.left + S(74)
+	return win.RECT{x, y, x + S(26), y + S(24)}
+}
+
+settings_refresh_value_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	minus := settings_refresh_minus_rect(layout)
+	x := minus.right + S(6)
+	return win.RECT{x, minus.top, x + S(66), minus.bottom}
+}
+
+settings_refresh_plus_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	value := settings_refresh_value_rect(layout)
+	x := value.right + S(6)
+	return win.RECT{x, value.top, x + S(26), value.bottom}
 }
 
 get_core_count :: proc() {
@@ -1876,6 +1934,118 @@ settings_set_sort :: proc(field: Sort_Field) {
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
+apply_refresh_timer :: proc() {
+	if app.hwnd != nil {
+		_ = win.SetTimer(app.hwnd, TIMER_ID, u32(settings.refresh_ms), nil)
+	}
+}
+
+settings_set_refresh_ms :: proc(ms: int) {
+	value := clamp(ms, REFRESH_MIN_MS, REFRESH_MAX_MS)
+	if settings.refresh_ms == value && !settings.refresh_custom_mode {
+		return
+	}
+	settings.refresh_ms = value
+	settings.refresh_custom_mode = false
+	save_settings()
+	apply_refresh_timer()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+refresh_is_preset :: proc(ms: int) -> bool {
+	for option in REFRESH_OPTIONS {
+		if option > 0 && option == ms {
+			return true
+		}
+	}
+	return false
+}
+
+is_refresh_custom :: proc() -> bool {
+	return settings.refresh_custom_mode
+}
+
+settings_use_custom_refresh :: proc() {
+	settings.refresh_ms = clamp(settings.refresh_custom, REFRESH_MIN_MS, REFRESH_MAX_MS)
+	settings.refresh_custom = settings.refresh_ms
+	settings.refresh_custom_mode = true
+	save_settings()
+	apply_refresh_timer()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+settings_adjust_custom_refresh :: proc(delta: int) {
+	value := clamp(settings.refresh_ms + delta, REFRESH_MIN_MS, REFRESH_MAX_MS)
+	if value == settings.refresh_ms && settings.refresh_custom_mode {
+		return
+	}
+	settings.refresh_ms = value
+	settings.refresh_custom = value
+	settings.refresh_custom_mode = true
+	save_settings()
+	apply_refresh_timer()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+begin_refresh_edit :: proc() {
+	app.refresh_edit = true
+	app.refresh_edit_replace = true
+	app.refresh_edit_len = 0
+
+	buf: [8]u8
+	s := fmt.bprintf(buf[:], "%d", settings.refresh_ms)
+	n := min(len(s), len(app.refresh_edit_buf))
+	copy(app.refresh_edit_buf[:], s[:n])
+	app.refresh_edit_len = n
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+commit_refresh_edit :: proc() {
+	if !app.refresh_edit {
+		return
+	}
+	app.refresh_edit = false
+	app.refresh_edit_replace = false
+
+	if app.refresh_edit_len > 0 {
+		value := clamp(
+			parse_int(string(app.refresh_edit_buf[:app.refresh_edit_len])),
+			REFRESH_MIN_MS,
+			REFRESH_MAX_MS,
+		)
+		settings.refresh_ms = value
+		settings.refresh_custom = value
+		settings.refresh_custom_mode = true
+		save_settings()
+		apply_refresh_timer()
+	}
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+cancel_refresh_edit :: proc() {
+	app.refresh_edit = false
+	app.refresh_edit_replace = false
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+refresh_label :: proc(buf: []u8, ms: int) -> string {
+	if ms >= 1000 && ms % 1000 == 0 {
+		return fmt.bprintf(buf, "%ds", ms/1000)
+	}
+	return fmt.bprintf(buf, "%dms", ms)
+}
+
+refresh_history_label :: proc(buf: []u8, ms: int) -> string {
+	total := SAMPLE_COUNT * ms / 1000
+	if total >= 60 {
+		if total % 60 == 0 {
+			return fmt.bprintf(buf, "%dm history", total/60)
+		}
+		return fmt.bprintf(buf, "%dm %ds history", total/60, total%60)
+	}
+	return fmt.bprintf(buf, "%ds history", total)
+}
+
 settings_set_cores_per_page :: proc(per: int) {
 	if per < 0 || per > MAX_CORES {
 		return
@@ -1924,6 +2094,7 @@ reset_settings :: proc() {
 	app.core_page = 0
 	save_settings()
 	apply_visual_settings()
+	apply_refresh_timer()
 }
 
 parse_bool :: proc(s: string) -> bool {
@@ -2032,6 +2203,18 @@ parse_settings :: proc(text: string) {
 			settings.sort_field = Sort_Field(clamp(parse_int(value), 0, len(SORT_FIELD_LABELS)-1))
 		case "sort_desc":
 			settings.sort_desc = parse_bool(value)
+		case "refresh_ms":
+			ms := parse_int(value)
+			if ms > 0 {
+				settings.refresh_ms = clamp(ms, REFRESH_MIN_MS, REFRESH_MAX_MS)
+			}
+		case "refresh_custom":
+			ms := parse_int(value)
+			if ms > 0 {
+				settings.refresh_custom = clamp(ms, REFRESH_MIN_MS, REFRESH_MAX_MS)
+			}
+		case "refresh_custom_mode":
+			settings.refresh_custom_mode = parse_bool(value)
 		}
 	}
 
@@ -2039,6 +2222,15 @@ parse_settings :: proc(text: string) {
 		settings.modules.cores = false
 	}
 	settings.theme = clamp(settings.theme, 0, len(THEMES)-1)
+	settings.refresh_ms = clamp(settings.refresh_ms, REFRESH_MIN_MS, REFRESH_MAX_MS)
+	settings.refresh_custom = clamp(settings.refresh_custom, REFRESH_MIN_MS, REFRESH_MAX_MS)
+	if settings.refresh_custom_mode {
+		settings.refresh_ms = settings.refresh_custom
+	} else if !refresh_is_preset(settings.refresh_ms) {
+		// A hand-edited interval that is not one of the chips is a custom value.
+		settings.refresh_custom_mode = true
+		settings.refresh_custom = settings.refresh_ms
+	}
 	if settings.cores_per_page <= 0 {
 		settings.cores_custom_mode = false
 	} else if settings.cores_custom_mode {
@@ -2087,8 +2279,9 @@ save_settings :: proc() {
 	buf: [1024]u8
 	content := fmt.bprintf(
 		buf[:],
-		"version=2\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
-		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\n",
+		"version=3\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
+		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\nrefresh_ms=%d\n" +
+		"refresh_custom=%d\nrefresh_custom_mode=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -2105,6 +2298,9 @@ save_settings :: proc() {
 		int(settings.cores_custom_mode),
 		int(settings.sort_field),
 		int(settings.sort_desc),
+		settings.refresh_ms,
+		settings.refresh_custom,
+		int(settings.refresh_custom_mode),
 	)
 	_ = os.write_entire_file(path, content)
 }

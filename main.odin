@@ -123,7 +123,7 @@ window_proc :: proc "system" (
 	case win.WM_CREATE:
 		app.hwnd = hwnd
 		init_resources()
-		_ = win.SetTimer(hwnd, TIMER_ID, 1000, nil)
+		_ = win.SetTimer(hwnd, TIMER_ID, u32(settings.refresh_ms), nil)
 		return 0
 
 	case win.WM_SIZE:
@@ -136,13 +136,12 @@ window_proc :: proc "system" (
 
 	case win.WM_TIMER:
 		if wparam == TIMER_ID {
-			app.tick += 1
 			if !app.pdh_attempted {
 				init_pdh_counters()
 				app.pdh_attempted = true
 			}
 			update_metrics()
-			if app.tick % 2 == 0 {
+			if GetTickCount64() - app.last_process_ms >= PROCESS_REFRESH_MS {
 				refresh_processes()
 			}
 			refresh_window_preview()
@@ -179,8 +178,18 @@ window_proc :: proc "system" (
 		}
 		return 0
 
+	case win.WM_CHAR:
+		if app.view == .settings && app.refresh_edit {
+			handle_refresh_edit_char(int(wparam))
+			return 0
+		}
+
 	case win.WM_KEYDOWN:
 		if int(wparam) == win.VK_ESCAPE {
+			if app.refresh_edit {
+				cancel_refresh_edit()
+				return 0
+			}
 			if app.view != .none {
 				set_view(.none)
 				return 0
@@ -298,6 +307,7 @@ set_view :: proc(view: Drawer_View) {
 		return
 	}
 	app.view = view
+	app.refresh_edit = false
 
 	height := app.bar_h
 	if view != .none {
@@ -501,6 +511,11 @@ handle_tasks_click :: proc(x, y: i32) {
 handle_settings_click :: proc(x, y: i32) {
 	layout := settings_layout()
 
+	// Clicking anywhere else finishes an in-progress interval edit.
+	if app.refresh_edit {
+		commit_refresh_edit()
+	}
+
 	if point_in_rect(x, y, layout.reset) {
 		reset_settings()
 		return
@@ -559,6 +574,60 @@ handle_settings_click :: proc(x, y: i32) {
 			settings_set_theme(i)
 			return
 		}
+	}
+
+	refresh_options := REFRESH_OPTIONS
+	for i in 0..<len(refresh_options) {
+		if point_in_rect(x, y, settings_refresh_chip_rect(layout, i)) {
+			if refresh_options[i] < 0 {
+				settings_use_custom_refresh()
+			} else {
+				settings_set_refresh_ms(refresh_options[i])
+			}
+			return
+		}
+	}
+
+	if is_refresh_custom() {
+		if point_in_rect(x, y, settings_refresh_minus_rect(layout)) {
+			settings_adjust_custom_refresh(-REFRESH_STEP_MS)
+			return
+		}
+		if point_in_rect(x, y, settings_refresh_plus_rect(layout)) {
+			settings_adjust_custom_refresh(REFRESH_STEP_MS)
+			return
+		}
+		if point_in_rect(x, y, settings_refresh_value_rect(layout)) {
+			begin_refresh_edit()
+			return
+		}
+	}
+}
+
+handle_refresh_edit_char :: proc(ch: int) {
+	switch ch {
+	case '0'..='9':
+		if app.refresh_edit_len < len(app.refresh_edit_buf) {
+			// The field opens with the current value selected; the first digit
+			// types over it instead of appending.
+			if app.refresh_edit_replace {
+				app.refresh_edit_len = 0
+				app.refresh_edit_replace = false
+			}
+			app.refresh_edit_buf[app.refresh_edit_len] = u8(ch)
+			app.refresh_edit_len += 1
+			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		}
+	case 8: // backspace
+		app.refresh_edit_replace = false
+		if app.refresh_edit_len > 0 {
+			app.refresh_edit_len -= 1
+			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		}
+	case 13: // enter
+		commit_refresh_edit()
+	case 27: // escape
+		cancel_refresh_edit()
 	}
 }
 
