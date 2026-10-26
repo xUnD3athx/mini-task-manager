@@ -145,6 +145,7 @@ window_proc :: proc "system" (
 			if app.tick % 2 == 0 {
 				refresh_processes()
 			}
+			refresh_window_preview()
 			_ = win.InvalidateRect(hwnd, nil, win.FALSE)
 		}
 		return 0
@@ -188,6 +189,7 @@ window_proc :: proc "system" (
 
 	case win.WM_DISPLAYCHANGE:
 		app.view = .none
+		destroy_window_preview()
 		update_screen_metrics()
 		position_appbar(hwnd)
 		return 0
@@ -195,6 +197,7 @@ window_proc :: proc "system" (
 	case win.WM_DESTROY:
 		remove_appbar(hwnd)
 		_ = win.KillTimer(hwnd, TIMER_ID)
+		destroy_window_preview()
 		destroy_backbuffer()
 		destroy_resources()
 		win.PostQuitMessage(0)
@@ -314,6 +317,7 @@ set_view :: proc(view: Drawer_View) {
 		height,
 		win.SWP_NOACTIVATE,
 	)
+	refresh_window_preview()
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
@@ -436,8 +440,13 @@ handle_tasks_click :: proc(x, y: i32) {
 	row := int((y - geo.list_top) / S(TASK_ROW_HEIGHT_DIP))
 	index := app.scroll + row
 	if row < geo.visible && index >= 0 && index < app.process_count {
-		app.selected_pid = app.processes[index].pid
+		pid := app.processes[index].pid
+		if pid != app.selected_pid {
+			app.task = Task_Metrics{pid = pid}
+		}
+		app.selected_pid = pid
 		app.has_selection = true
+		refresh_window_preview()
 		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 	}
 }

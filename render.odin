@@ -465,8 +465,10 @@ draw_drawer :: proc(dc: win.HDC) {
 	case .tasks:
 		draw_tasks_view(dc)
 	case .settings:
+		hide_preview_thumbnail()
 		draw_settings_view(dc)
 	case .none:
+		hide_preview_thumbnail()
 	}
 
 	bottom := win.RECT{0, app.height - 1, app.width, app.height}
@@ -483,12 +485,21 @@ draw_tasks_view :: proc(dc: win.HDC) {
 	right_x := geo.panel.right + S(18)
 	right := app.width - S(18)
 	if right - right_x <= S(220) {
+		hide_preview_thumbnail()
 		return
 	}
 
-	stats_h := S(90)
+	// Selecting a task turns the right side into that task's detail page.
+	if app.has_selection {
+		draw_task_view(dc, right_x, right, geo.panel.top, geo.panel.bottom)
+		return
+	}
+	hide_preview_thumbnail()
+
 	gap := S(18)
 	panel_h := geo.panel.bottom - geo.panel.top
+
+	stats_h := S(90)
 	cards_h := panel_h - stats_h - gap
 	if cards_h < S(170) {
 		cards_h = panel_h
@@ -539,6 +550,171 @@ draw_tasks_view :: proc(dc: win.HDC) {
 		stats_rect := win.RECT{right_x, geo.panel.top + cards_h + gap, right, geo.panel.top + cards_h + gap + stats_h}
 		draw_stats_row(dc, stats_rect)
 	}
+}
+
+// Detail page for the selected task: its window on the left, its own metrics on
+// the right.
+draw_task_view :: proc(dc: win.HDC, left, right, top, bottom: i32) {
+	gap := S(18)
+	detail_rect := win.RECT{left, top, right, bottom}
+	show_preview := false
+
+	if preview_is_alive() {
+		width := right - left
+		preview_w := clamp(width * 46 / 100, S(320), S(900))
+		if width - preview_w - gap >= S(420) {
+			preview_rect := win.RECT{left, top, left + preview_w, bottom}
+			detail_rect = win.RECT{left + preview_w + gap, top, right, bottom}
+			draw_window_preview(dc, preview_rect)
+			show_preview = true
+		}
+	}
+	if !show_preview {
+		hide_preview_thumbnail()
+	}
+
+	draw_task_detail(dc, detail_rect)
+}
+
+draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
+	draw_card(dc, rect)
+
+	pad := S(20)
+	inner_x := rect.left + pad
+	inner_w := rect.right - pad - inner_x
+	if inner_w < S(80) || rect.bottom - rect.top < S(200) {
+		return
+	}
+
+	p, found := find_process(app.selected_pid)
+
+	// Header: process name and PID.
+	pid_buf: [32]u8
+	pid_text := fmt.bprintf(pid_buf[:], "PID %d", app.selected_pid)
+	pid_w := S(120)
+	if found {
+		draw_text_w(dc, win.wstring(raw_data(p.name[:])), inner_x, rect.top + S(14),
+			inner_w - pid_w - S(10), S(28), app.fonts.title, COL_TEXT,
+			DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
+	} else {
+		draw_text(dc, "—", inner_x, rect.top + S(14), inner_w - pid_w - S(10), S(28),
+			app.fonts.title, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+	}
+	draw_text(dc, pid_text, rect.right - pad - pid_w, rect.top + S(20), pid_w, S(18),
+		app.fonts.small, COL_MUTED, DT_RIGHT | DT_SINGLELINE)
+
+	divider_y := rect.top + S(54)
+	divider := win.RECT{inner_x, divider_y, rect.right - pad, divider_y + 1}
+	_ = win.FillRect(dc, &divider, app.brushes.line)
+
+	// CPU headline and total CPU time.
+	draw_text(dc, "TASK CPU", inner_x, rect.top + S(70), inner_w, S(14),
+		app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+
+	cpu_buf: [16]u8
+	cpu_value := "—"
+	if found {
+		cpu_value = fmt.bprintf(cpu_buf[:], "%d%%", i32(p.cpu_percent + 0.5))
+	}
+	draw_text(dc, cpu_value, inner_x, rect.top + S(86), inner_w, S(46),
+		app.fonts.huge, COL_TEXT, DT_LEFT | DT_SINGLELINE)
+
+	if found {
+		time_buf: [32]u8
+		time_label_buf: [64]u8
+		time_value := format_cpu_time(time_buf[:], p.cpu_time)
+		time_label := fmt.bprintf(time_label_buf[:], "CPU time %s", time_value)
+		draw_text(dc, time_label, inner_x, rect.top + S(132), inner_w, S(16),
+			app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+	}
+
+	// Metric tiles are anchored to the bottom so the sparkline can grow.
+	tile_gap := S(18)
+	tile_w := (inner_w - tile_gap*2) / 3
+	row2_y := rect.bottom - pad - S(42)
+	row1_y := row2_y - S(56)
+
+	spark_top := rect.top + S(156)
+	spark_bottom := row1_y - S(20)
+	if spark_bottom - spark_top >= S(58) {
+		draw_text(dc, "CPU HISTORY", inner_x, spark_top, inner_w, S(14),
+			app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+		spark := win.RECT{inner_x, spark_top + S(18), rect.right - pad, spark_bottom}
+		draw_sparkline(dc, spark, app.task.cpu_samples[:], app.pens.cpu, app.brushes.cpu_fill)
+	}
+
+	mem_buf: [32]u8
+	threads_buf: [16]u8
+	handles_buf: [16]u8
+	read_buf: [32]u8
+	write_buf: [32]u8
+	gpu_buf: [16]u8
+
+	mem_text := "—"
+	threads_text := "—"
+	if found {
+		mem_text = format_memory(mem_buf[:], p.working_set)
+		threads_text = fmt.bprintf(threads_buf[:], "%d", p.threads)
+	}
+
+	handles_text := "—"
+	if app.task.handles > 0 {
+		handles_text = fmt.bprintf(handles_buf[:], "%d", app.task.handles)
+	}
+
+	read_factor, read_suffix := rate_scale(app.task.read_bps)
+	read_text := fmt.bprintf(read_buf[:], "%.1f %s", app.task.read_bps/read_factor, read_suffix)
+	write_factor, write_suffix := rate_scale(app.task.write_bps)
+	write_text := fmt.bprintf(write_buf[:], "%.1f %s", app.task.write_bps/write_factor, write_suffix)
+
+	gpu_text := "—"
+	if app.gpu_ok {
+		gpu_text = fmt.bprintf(gpu_buf[:], "%d%%", i32(app.task.gpu + 0.5))
+	}
+
+	if row1_y - S(20) > rect.top + S(170) {
+		draw_metric_tile(dc, inner_x, row1_y, tile_w, mem_text, "MEMORY")
+		draw_metric_tile(dc, inner_x + tile_w + tile_gap, row1_y, tile_w, threads_text, "THREADS")
+		draw_metric_tile(dc, inner_x + (tile_w + tile_gap)*2, row1_y, tile_w, handles_text, "HANDLES")
+
+		draw_metric_tile(dc, inner_x, row2_y, tile_w, read_text, "I/O READ")
+		draw_metric_tile(dc, inner_x + tile_w + tile_gap, row2_y, tile_w, write_text, "I/O WRITE")
+		draw_metric_tile(dc, inner_x + (tile_w + tile_gap)*2, row2_y, tile_w, gpu_text, "GPU")
+	}
+}
+
+draw_metric_tile :: proc(dc: win.HDC, x, y, w: i32, value, label: string) {
+	draw_text(dc, value, x, y, w, S(28), app.fonts.med, COL_TEXT,
+		DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS)
+	draw_text(dc, label, x, y + S(26), w, S(14), app.fonts.tiny, COL_MUTED,
+		DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS)
+}
+
+draw_window_preview :: proc(dc: win.HDC, rect: win.RECT) {
+	draw_card(dc, rect)
+
+	pad := S(16)
+	inner_x := rect.left + pad
+	inner_w := rect.right - rect.left - pad*2
+	if inner_w < S(80) {
+		return
+	}
+
+	draw_text(dc, "WINDOW", inner_x, rect.top + S(14), inner_w, S(14),
+		app.fonts.tiny, COL_MUTED, DT_LEFT | DT_SINGLELINE)
+
+	if len(app.preview.title) > 0 && app.preview.title[0] != 0 {
+		draw_text_w(dc, win.wstring(raw_data(app.preview.title[:])), inner_x, rect.top + S(30),
+			inner_w, S(20), app.fonts.small, COL_TEXT,
+			DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
+	}
+
+	content := win.RECT{inner_x, rect.top + S(58), rect.right - pad, rect.bottom - pad}
+	if content.bottom <= content.top || content.right <= content.left {
+		return
+	}
+	fill_round(dc, content, app.brushes.dark, app.pens.border, S(8))
+	draw_preview_thumbnail(content)
 }
 
 draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {

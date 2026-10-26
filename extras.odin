@@ -48,7 +48,20 @@ foreign gdi32 {
 foreign kernel32 {
 	GetSystemTimes :: proc(idle: ^win.FILETIME, kernel: ^win.FILETIME, user: ^win.FILETIME) -> win.BOOL ---
 	GetTickCount64 :: proc() -> u64 ---
+	GetProcessHandleCount :: proc(process: win.HANDLE, count: ^u32) -> win.BOOL ---
+	GetProcessIoCounters :: proc(process: win.HANDLE, counters: ^Io_Counters) -> win.BOOL ---
 }
+
+Io_Counters :: struct {
+	read_operations:  u64,
+	write_operations: u64,
+	other_operations: u64,
+	read_bytes:       u64,
+	write_bytes:      u64,
+	other_bytes:      u64,
+}
+
+#assert(size_of(Io_Counters) == 48)
 
 SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION :: 8
 
@@ -190,6 +203,39 @@ Mib_If_Table :: struct {
 @(default_calling_convention="system")
 foreign iphlpapi {
 	GetIfTable :: proc(table: rawptr, size: ^u32, order: win.BOOL) -> u32 ---
+}
+
+foreign import dwmapi "system:Dwmapi.lib"
+
+DWM_TNP_RECTDESTINATION      :: 0x0000_0001
+DWM_TNP_RECTSOURCE           :: 0x0000_0002
+DWM_TNP_OPACITY              :: 0x0000_0004
+DWM_TNP_VISIBLE              :: 0x0000_0008
+DWM_TNP_SOURCECLIENTAREAONLY :: 0x0000_0010
+
+Dwm_Thumbnail_Properties :: struct {
+	dw_flags:                u32,
+	rc_destination:          win.RECT,
+	rc_source:               win.RECT,
+	opacity:                 u8,
+	visible:                 win.BOOL,
+	source_client_area_only: win.BOOL,
+}
+
+#assert(size_of(Dwm_Thumbnail_Properties) == 48)
+
+@(default_calling_convention="system")
+foreign dwmapi {
+	DwmRegisterThumbnail :: proc(
+		destination: win.HWND,
+		source: win.HWND,
+		thumbnail: ^win.HANDLE,
+	) -> win.HRESULT ---
+	DwmUpdateThumbnailProperties :: proc(
+		thumbnail: win.HANDLE,
+		properties: ^Dwm_Thumbnail_Properties,
+	) -> win.HRESULT ---
+	DwmUnregisterThumbnail :: proc(thumbnail: win.HANDLE) -> win.HRESULT ---
 }
 
 PROCESS_QUERY_INFORMATION         :: 0x0400

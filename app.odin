@@ -271,6 +271,21 @@ Process :: struct {
 	cpu_percent: f32,
 }
 
+// Per-metrics of the task selected in the drawer, refreshed independently of
+// the process list so the detail page can show IO rates and GPU usage.
+Task_Metrics :: struct {
+	pid:          u32,
+	handles:      u32,
+	gpu:          f32,
+	read_bps:     f64,
+	write_bps:    f64,
+	prev_read:    u64,
+	prev_write:   u64,
+	prev_ms:      u64,
+	have_io_prev: bool,
+	cpu_samples:  [SAMPLE_COUNT]f32,
+}
+
 Fonts :: struct {
 	title, heading, huge, med, stat, body, small, tiny, badge: win.HFONT,
 }
@@ -314,6 +329,8 @@ App :: struct {
 	has_selection:   bool,
 	scroll:          int,
 	last_process_ms: u64,
+	preview:         Window_Preview,
+	task:            Task_Metrics,
 
 	cpu:         f32,
 	mem_percent: f32,
@@ -604,6 +621,15 @@ find_old_process :: proc(pid: u32) -> (cpu_time: u64, found: bool) {
 	return 0, false
 }
 
+find_process :: proc(pid: u32) -> (p: ^Process, found: bool) {
+	for i in 0..<app.process_count {
+		if app.processes[i].pid == pid {
+			return &app.processes[i], true
+		}
+	}
+	return nil, false
+}
+
 refresh_processes :: proc() {
 	now := GetTickCount64()
 	elapsed_ms := now - app.last_process_ms
@@ -707,10 +733,71 @@ refresh_processes :: proc() {
 		}
 		if !alive {
 			app.has_selection = false
+			app.task = {}
+			refresh_window_preview()
+		}
+	}
+
+	if app.has_selection && app.task.pid == app.selected_pid {
+		if p, found := find_process(app.selected_pid); found {
+			push_task_cpu_sample(p.cpu_percent)
 		}
 	}
 
 	clamp_scroll()
+}
+
+push_task_cpu_sample :: proc(v: f32) {
+	for i in 1..<SAMPLE_COUNT {
+		app.task.cpu_samples[i-1] = app.task.cpu_samples[i]
+	}
+	app.task.cpu_samples[SAMPLE_COUNT-1] = v
+}
+
+update_task_metrics :: proc(now: u64) {
+	if !app.has_selection {
+		if app.task.pid != 0 {
+			app.task = {}
+		}
+		return
+	}
+	if app.task.pid != app.selected_pid {
+		app.task = Task_Metrics{pid = app.selected_pid}
+	}
+
+	handle := win.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, win.FALSE, app.selected_pid)
+	if handle == nil {
+		return
+	}
+	defer win.CloseHandle(handle)
+
+	handles: u32
+	if GetProcessHandleCount(handle, &handles) {
+		app.task.handles = handles
+	}
+
+	io: Io_Counters
+	if GetProcessIoCounters(handle, &io) {
+		if app.task.have_io_prev && now > app.task.prev_ms {
+			seconds := f64(now - app.task.prev_ms) / 1000.0
+			if seconds > 0 {
+				read_delta: u64 = 0
+				if io.read_bytes >= app.task.prev_read {
+					read_delta = io.read_bytes - app.task.prev_read
+				}
+				write_delta: u64 = 0
+				if io.write_bytes >= app.task.prev_write {
+					write_delta = io.write_bytes - app.task.prev_write
+				}
+				app.task.read_bps = f64(read_delta) / seconds
+				app.task.write_bps = f64(write_delta) / seconds
+			}
+		}
+		app.task.prev_read = io.read_bytes
+		app.task.prev_write = io.write_bytes
+		app.task.prev_ms = now
+		app.task.have_io_prev = true
+	}
 }
 
 push_cpu_sample :: proc(v: f32) {
@@ -811,6 +898,26 @@ wide_has_ascii :: proc(text: [^]u16, needle: string) -> bool {
 	return false
 }
 
+// GPU Engine instance names look like
+// "pid_1234_luid_0x00000000_0x0000CEFE_phys_0_eng_0_engtype_3D"; the leading
+// pid is the process the engine usage belongs to.
+gpu_engine_pid :: proc(name: [^]u16) -> u32 {
+	if name == nil {
+		return 0
+	}
+	prefix := [?]u16{'p', 'i', 'd', '_'}
+	for i in 0..<len(prefix) {
+		if name[i] != prefix[i] {
+			return 0
+		}
+	}
+	pid: u32 = 0
+	for i := len(prefix); name[i] >= '0' && name[i] <= '9'; i += 1 {
+		pid = pid*10 + u32(name[i] - '0')
+	}
+	return pid
+}
+
 gpu_engine_group :: proc(name: [^]u16) -> int {
 	if wide_has_ascii(name, "engtype_3d") {
 		return 0
@@ -831,6 +938,7 @@ gpu_engine_group :: proc(name: [^]u16) -> int {
 }
 
 update_pdh_rates :: proc() {
+	app.task.gpu = 0
 	if app.pdh_query == nil {
 		app.disk_read_bps = 0
 		app.disk_write_bps = 0
@@ -874,6 +982,9 @@ update_pdh_rates :: proc() {
 					if v > 0 {
 						group := gpu_engine_group(cast([^]u16)item.name)
 						sums[group] += v
+						if app.has_selection && gpu_engine_pid(cast([^]u16)item.name) == app.selected_pid {
+							app.task.gpu += f32(v)
+						}
 					}
 				}
 				ptr += uintptr(size_of(Pdh_Fmt_Counter_Value_Item))
@@ -892,6 +1003,9 @@ update_pdh_rates :: proc() {
 			}
 			app.gpu = f32(overall)
 			app.gpu_ok = true
+			if app.task.gpu > 100 {
+				app.task.gpu = 100
+			}
 		}
 	}
 
@@ -1080,6 +1194,7 @@ update_metrics :: proc() {
 	push_gpu_sample(app.gpu)
 
 	update_network_rates(now)
+	update_task_metrics(now)
 
 	app.uptime_secs = now / 1000
 }
@@ -1108,6 +1223,20 @@ format_memory :: proc(buf: []u8, bytes: u64) -> string {
 		return fmt.bprintf(buf, "%.1f GB", mb/1024.0)
 	}
 	return fmt.bprintf(buf, "%.0f MB", mb)
+}
+
+format_cpu_time :: proc(buf: []u8, ticks: u64) -> string {
+	secs := ticks / 10_000_000
+	hours := secs / 3600
+	mins := (secs % 3600) / 60
+	rem := secs % 60
+	if hours > 0 {
+		return fmt.bprintf(buf, "%dh %dm %ds", hours, mins, rem)
+	}
+	if mins > 0 {
+		return fmt.bprintf(buf, "%dm %ds", mins, rem)
+	}
+	return fmt.bprintf(buf, "%ds", rem)
 }
 
 rate_scale :: proc(bps: f64) -> (factor: f64, suffix: string) {
