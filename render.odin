@@ -792,8 +792,30 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 	draw_text(dc, count_text, geo.panel.right - S(20) - S(70), geo.panel.top + S(16),
 		S(70), S(20), app.fonts.small, COL_MUTED, DT_RIGHT | DT_VCENTER | DT_SINGLELINE)
 
-	divider := win.RECT{geo.panel.left + S(18), geo.panel.top + S(58),
-		geo.panel.right - S(18), geo.panel.top + S(59)}
+	labels := SORT_FIELD_LABELS
+	for i in 0..<len(labels) {
+		chip := task_sort_chip_rect(geo.panel, i)
+		active := settings.sort_field == Sort_Field(i)
+		brush := app.brushes.badge
+		color := COL_MUTED
+		label := labels[i]
+		if active {
+			arrow := "↓"
+			if !settings.sort_desc {
+				arrow = "↑"
+			}
+			label_buf: [24]u8
+			label = fmt.bprintf(label_buf[:], "%s %s", labels[i], arrow)
+			brush = app.brushes.accent
+			color = COL_BADGE_TEXT
+		}
+		fill_round(dc, chip, brush, app.pens.border, S(6))
+		draw_text(dc, label, chip.left, chip.top, chip.right - chip.left, chip.bottom - chip.top,
+			app.fonts.tiny, color, DT_CENTER | DT_VCENTER | DT_SINGLELINE)
+	}
+
+	divider := win.RECT{geo.panel.left + S(18), geo.panel.top + S(72),
+		geo.panel.right - S(18), geo.panel.top + S(73)}
 	_ = win.FillRect(dc, &divider, app.brushes.line)
 
 	if app.process_count == 0 {
@@ -876,7 +898,26 @@ draw_process_row :: proc(dc: win.HDC, p: ^Process, left, right, y, row_h: i32) {
 	}
 
 	name := win.wstring(raw_data(p.name[:]))
-	draw_text_w(dc, name, tx, y + S(6), tw, S(21), app.fonts.body, COL_TEXT,
+	name_w := tw
+	extra_buf: [32]u8
+	extra := ""
+	switch settings.sort_field {
+	case .gpu:
+		extra = fmt.bprintf(extra_buf[:], "GPU %d%%", i32(p.gpu_percent + 0.5))
+	case .disk:
+		factor, suffix := rate_scale(p.io_bps)
+		extra = fmt.bprintf(extra_buf[:], "I/O %.1f %s", p.io_bps/factor, suffix)
+	case .cpu, .memory:
+	}
+	if len(extra) > 0 {
+		extra_w := S(110)
+		if extra_w < tw/2 {
+			name_w = tw - extra_w - S(8)
+			draw_text(dc, extra, tx + tw - extra_w, y + S(5), extra_w, S(16),
+				app.fonts.tiny, COL_MUTED, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS)
+		}
+	}
+	draw_text_w(dc, name, tx, y + S(6), name_w, S(21), app.fonts.body, COL_TEXT,
 		DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX)
 
 	sub_buf: [64]u8

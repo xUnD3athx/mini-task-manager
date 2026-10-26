@@ -447,6 +447,14 @@ handle_tasks_click :: proc(x, y: i32) {
 	if geo.visible <= 0 || geo.panel.right <= geo.panel.left {
 		return
 	}
+
+	for i in 0..<len(SORT_FIELD_LABELS) {
+		if point_in_rect(x, y, task_sort_chip_rect(geo.panel, i)) {
+			settings_set_sort(Sort_Field(i))
+			return
+		}
+	}
+
 	if x < geo.panel.left || x >= geo.panel.right || y < geo.list_top || y >= geo.list_bottom {
 		return
 	}

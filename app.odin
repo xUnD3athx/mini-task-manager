@@ -22,8 +22,11 @@ BAR_RIGHT_RESERVE_DIP   :: 158
 BAR_SECTION_GAP_DIP     :: 16
 DRAWER_HEIGHT_DIP       :: 540
 TASK_PANEL_PADDING_DIP  :: 18
-TASK_PANEL_HEADER_DIP   :: 68
+TASK_PANEL_HEADER_DIP   :: 82
 TASK_ROW_HEIGHT_DIP     :: 52
+TASK_SORT_ROW_DIP       :: 44
+TASK_SORT_CHIP_H_DIP    :: 22
+TASK_SORT_CHIP_GAP_DIP  :: 6
 
 Color :: [3]u8
 
@@ -109,15 +112,26 @@ Module_Flags :: struct {
 }
 
 Settings :: struct {
-	modules:        Module_Flags,
-	accent:         Color,
-	memory_color:   Color,
-	gpu_color:      Color,
-	theme:          int,
-	cores_per_page: int,
-	cores_custom:   int,
+	modules:           Module_Flags,
+	accent:            Color,
+	memory_color:      Color,
+	gpu_color:         Color,
+	theme:             int,
+	cores_per_page:    int,
+	cores_custom:      int,
 	cores_custom_mode: bool,
+	sort_field:        Sort_Field,
+	sort_desc:         bool,
 }
+
+Sort_Field :: enum {
+	cpu,
+	memory,
+	gpu,
+	disk,
+}
+
+SORT_FIELD_LABELS :: [4]string{"CPU", "MEM", "GPU", "DISK"}
 
 // 0 means "all cores" (Max); -1 is the custom entry, which uses
 // settings.cores_custom instead of a fixed value.
@@ -142,6 +156,8 @@ default_settings :: proc() -> Settings {
 		theme = 0,
 		cores_per_page = CORE_PAGE_OPTIONS[0],
 		cores_custom = 5,
+		sort_field = .cpu,
+		sort_desc = true,
 	}
 }
 
@@ -278,6 +294,18 @@ Process :: struct {
 	working_set: u64,
 	cpu_time:    u64,
 	cpu_percent: f32,
+	gpu_percent: f32,
+	io_bps:      f64,
+	io_total:    u64,
+}
+
+// Per-process GPU usage gathered from the GPU Engine counter instances, which
+// carry the owning PID in their name.
+GPU_PID_CAPACITY :: 128
+
+Gpu_Pid_Usage :: struct {
+	pid:   u32,
+	usage: f32,
 }
 
 // Per-metrics of the task selected in the drawer, refreshed independently of
@@ -365,6 +393,8 @@ App :: struct {
 	gpu_mem_ok:     bool,
 	gpu_counter:    rawptr,
 	gpu_mem_counter: rawptr,
+	gpu_pid_usage:  [GPU_PID_CAPACITY]Gpu_Pid_Usage,
+	gpu_pid_count:  int,
 
 	disk_read_bps:  f64,
 	disk_write_bps: f64,
@@ -832,13 +862,107 @@ process_name_less :: proc(a, b: ^Process) -> bool {
 	return false
 }
 
-find_old_process :: proc(pid: u32) -> (cpu_time: u64, found: bool) {
-	for i in 0..<app.process_count {
-		if app.processes[i].pid == pid {
-			return app.processes[i].cpu_time, true
+process_order_less :: proc(a, b: ^Process) -> bool {
+	switch settings.sort_field {
+	case .cpu:
+		if a.cpu_percent != b.cpu_percent {
+			if settings.sort_desc {
+				return a.cpu_percent > b.cpu_percent
+			}
+			return a.cpu_percent < b.cpu_percent
+		}
+	case .memory:
+		if a.working_set != b.working_set {
+			if settings.sort_desc {
+				return a.working_set > b.working_set
+			}
+			return a.working_set < b.working_set
+		}
+	case .gpu:
+		if a.gpu_percent != b.gpu_percent {
+			if settings.sort_desc {
+				return a.gpu_percent > b.gpu_percent
+			}
+			return a.gpu_percent < b.gpu_percent
+		}
+	case .disk:
+		if a.io_bps != b.io_bps {
+			if settings.sort_desc {
+				return a.io_bps > b.io_bps
+			}
+			return a.io_bps < b.io_bps
 		}
 	}
-	return 0, false
+	// Ties keep an alphabetical order so the list doesn't shuffle per sample.
+	return process_name_less(a, b)
+}
+
+sort_processes :: proc(list: []Process) {
+	for i in 1..<len(list) {
+		p := list[i]
+		j := i - 1
+		for j >= 0 && process_order_less(&p, &list[j]) {
+			list[j+1] = list[j]
+			j -= 1
+		}
+		list[j+1] = p
+	}
+}
+
+task_sort_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {
+	gap := S(TASK_SORT_CHIP_GAP_DIP)
+	inner := (panel.right - panel.left) - S(40)
+	w := (inner - gap*(len(SORT_FIELD_LABELS)-1)) / len(SORT_FIELD_LABELS)
+	if w < S(40) {
+		w = S(40)
+	}
+	if w > S(70) {
+		w = S(70)
+	}
+	x := panel.left + S(20) + i32(index)*(w + gap)
+	y := panel.top + S(TASK_SORT_ROW_DIP)
+	return win.RECT{x, y, x + w, y + S(TASK_SORT_CHIP_H_DIP)}
+}
+
+find_old_process :: proc(pid: u32) -> (p: ^Process, found: bool) {
+	for i in 0..<app.process_count {
+		if app.processes[i].pid == pid {
+			return &app.processes[i], true
+		}
+	}
+	return nil, false
+}
+
+gpu_usage_add :: proc(pid: u32, usage: f32) {
+	if pid == 0 || usage <= 0 {
+		return
+	}
+	for i in 0..<app.gpu_pid_count {
+		if app.gpu_pid_usage[i].pid == pid {
+			app.gpu_pid_usage[i].usage += usage
+			return
+		}
+	}
+	if app.gpu_pid_count < GPU_PID_CAPACITY {
+		app.gpu_pid_usage[app.gpu_pid_count] = Gpu_Pid_Usage{pid = pid, usage = usage}
+		app.gpu_pid_count += 1
+	}
+}
+
+gpu_usage_for_pid :: proc(pid: u32) -> f32 {
+	if pid == 0 {
+		return 0
+	}
+	for i in 0..<app.gpu_pid_count {
+		if app.gpu_pid_usage[i].pid == pid {
+			v := app.gpu_pid_usage[i].usage
+			if v > 100 {
+				return 100
+			}
+			return v
+		}
+	}
+	return 0
 }
 
 find_process :: proc(pid: u32) -> (p: ^Process, found: bool) {
@@ -887,6 +1011,8 @@ refresh_processes :: proc() {
 		}
 		p.name[n] = 0
 
+		old, has_old := find_old_process(p.pid)
+
 		handle := win.OpenProcess(
 			PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
 			win.FALSE,
@@ -903,13 +1029,17 @@ refresh_processes :: proc() {
 			if win.GetProcessTimes(handle, &creation, &exit_time, &kernel_time, &user_time) {
 				p.cpu_time = filetime_value(kernel_time) + filetime_value(user_time)
 			}
+
+			io: Io_Counters
+			if GetProcessIoCounters(handle, &io) {
+				p.io_total = io.read_bytes + io.write_bytes
+			}
 			_ = win.CloseHandle(handle)
 		}
 
-		if app.cores > 0 && elapsed_ms > 0 && p.cpu_time > 0 {
-			old_cpu, found := find_old_process(p.pid)
-			if found && p.cpu_time > old_cpu {
-				delta := p.cpu_time - old_cpu
+		if has_old && elapsed_ms > 0 {
+			if p.cpu_time > old.cpu_time && app.cores > 0 {
+				delta := p.cpu_time - old.cpu_time
 				units := f64(elapsed_ms) * 10000.0 * f64(app.cores)
 				pct := f32(f64(delta) / units * 100.0)
 				if pct < 0 {
@@ -920,20 +1050,17 @@ refresh_processes :: proc() {
 				}
 				p.cpu_percent = pct
 			}
+			if p.io_total >= old.io_total {
+				p.io_bps = f64(p.io_total - old.io_total) * 1000.0 / f64(elapsed_ms)
+			}
 		}
+
+		p.gpu_percent = gpu_usage_for_pid(p.pid)
 
 		count += 1
 	}
 
-	for i in 1..<count {
-		p := next_processes[i]
-		j := i - 1
-		for j >= 0 && process_name_less(&p, &next_processes[j]) {
-			next_processes[j+1] = next_processes[j]
-			j -= 1
-		}
-		next_processes[j+1] = p
-	}
+	sort_processes(next_processes[:count])
 
 	for i in 0..<count {
 		app.processes[i] = next_processes[i]
@@ -1169,6 +1296,7 @@ gpu_engine_group :: proc(name: [^]u16) -> int {
 
 update_pdh_rates :: proc() {
 	app.task.gpu = 0
+	app.gpu_pid_count = 0
 	if app.pdh_query == nil {
 		app.disk_read_bps = 0
 		app.disk_write_bps = 0
@@ -1212,9 +1340,7 @@ update_pdh_rates :: proc() {
 					if v > 0 {
 						group := gpu_engine_group(cast([^]u16)item.name)
 						sums[group] += v
-						if app.has_selection && gpu_engine_pid(cast([^]u16)item.name) == app.selected_pid {
-							app.task.gpu += f32(v)
-						}
+						gpu_usage_add(gpu_engine_pid(cast([^]u16)item.name), f32(v))
 					}
 				}
 				ptr += uintptr(size_of(Pdh_Fmt_Counter_Value_Item))
@@ -1232,8 +1358,8 @@ update_pdh_rates :: proc() {
 			}
 			app.gpu = f32(overall)
 			app.gpu_ok = true
-			if app.task.gpu > 100 {
-				app.task.gpu = 100
+			if app.has_selection {
+				app.task.gpu = gpu_usage_for_pid(app.selected_pid)
 			}
 		}
 	}
@@ -1538,6 +1664,18 @@ settings_toggle_module :: proc(id: Module_Id) {
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
+settings_set_sort :: proc(field: Sort_Field) {
+	if settings.sort_field == field {
+		settings.sort_desc = !settings.sort_desc
+	} else {
+		settings.sort_field = field
+		settings.sort_desc = true
+	}
+	sort_processes(app.processes[:app.process_count])
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 settings_set_cores_per_page :: proc(per: int) {
 	if per < 0 || per > MAX_CORES {
 		return
@@ -1636,6 +1774,7 @@ parse_hex_color :: proc(s: string) -> (Color, bool) {
 }
 
 parse_settings :: proc(text: string) {
+	version := 1
 	lines, _ := strings.split_lines(text, context.temp_allocator)
 	for raw in lines {
 		line := strings.trim_space(raw)
@@ -1650,6 +1789,8 @@ parse_settings :: proc(text: string) {
 		value := strings.trim_space(line[eq+1:])
 
 		switch key {
+		case "version":
+			version = parse_int(value)
 		case "show_cpu":
 			settings.modules.cpu = parse_bool(value)
 		case "show_cores":
@@ -1687,6 +1828,10 @@ parse_settings :: proc(text: string) {
 			settings.cores_custom = clamp(parse_int(value), 1, MAX_CORES)
 		case "cores_custom_mode":
 			settings.cores_custom_mode = parse_bool(value)
+		case "sort_field":
+			settings.sort_field = Sort_Field(clamp(parse_int(value), 0, len(SORT_FIELD_LABELS)-1))
+		case "sort_desc":
+			settings.sort_desc = parse_bool(value)
 		}
 	}
 
@@ -1698,6 +1843,11 @@ parse_settings :: proc(text: string) {
 		settings.cores_custom_mode = false
 	} else if settings.cores_custom_mode {
 		settings.cores_custom = clamp(settings.cores_per_page, 1, MAX_CORES)
+	}
+	// Older builds persisted a different sort field set.
+	if version < 2 {
+		settings.sort_field = .cpu
+		settings.sort_desc = true
 	}
 }
 
@@ -1737,8 +1887,8 @@ save_settings :: proc() {
 	buf: [1024]u8
 	content := fmt.bprintf(
 		buf[:],
-		"version=1\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
-		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\n",
+		"version=2\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
+		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -1753,6 +1903,8 @@ save_settings :: proc() {
 		settings.cores_per_page,
 		settings.cores_custom,
 		int(settings.cores_custom_mode),
+		int(settings.sort_field),
+		int(settings.sort_desc),
 	)
 	_ = os.write_entire_file(path, content)
 }
