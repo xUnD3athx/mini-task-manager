@@ -429,6 +429,20 @@ handle_click :: proc(lparam: win.LPARAM) {
 }
 
 handle_tasks_click :: proc(x, y: i32) {
+	band := core_band_layout()
+	if point_in_rect(x, y, band.prev) {
+		app.core_page -= 1
+		clamp_core_page()
+		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		return
+	}
+	if point_in_rect(x, y, band.next) {
+		app.core_page += 1
+		clamp_core_page()
+		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		return
+	}
+
 	geo := tasks_geometry()
 	if geo.visible <= 0 || geo.panel.right <= geo.panel.left {
 		return
@@ -466,6 +480,29 @@ handle_settings_click :: proc(x, y: i32) {
 				return
 			}
 			settings_toggle_module(id)
+			return
+		}
+	}
+
+	options := CORE_PAGE_OPTIONS
+	for i in 0..<len(options) {
+		if point_in_rect(x, y, settings_cores_page_rect(layout, i)) {
+			if options[i] < 0 {
+				settings_use_custom_cores()
+			} else {
+				settings_set_cores_per_page(options[i])
+			}
+			return
+		}
+	}
+
+	if is_core_page_custom() {
+		if point_in_rect(x, y, settings_custom_minus_rect(layout)) {
+			settings_adjust_custom_cores(-1)
+			return
+		}
+		if point_in_rect(x, y, settings_custom_plus_rect(layout)) {
+			settings_adjust_custom_cores(1)
 			return
 		}
 	}

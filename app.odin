@@ -109,12 +109,19 @@ Module_Flags :: struct {
 }
 
 Settings :: struct {
-	modules:      Module_Flags,
-	accent:       Color,
-	memory_color: Color,
-	gpu_color:    Color,
-	theme:        int,
+	modules:        Module_Flags,
+	accent:         Color,
+	memory_color:   Color,
+	gpu_color:      Color,
+	theme:          int,
+	cores_per_page: int,
+	cores_custom:   int,
+	cores_custom_mode: bool,
 }
+
+// 0 means "all cores" (Max); -1 is the custom entry, which uses
+// settings.cores_custom instead of a fixed value.
+CORE_PAGE_OPTIONS :: [6]int{4, 6, 8, 16, 0, -1}
 
 settings: Settings
 
@@ -133,6 +140,8 @@ default_settings :: proc() -> Settings {
 		memory_color = MEMORY_PALETTE[0],
 		gpu_color = GPU_PALETTE[0],
 		theme = 0,
+		cores_per_page = CORE_PAGE_OPTIONS[0],
+		cores_custom = 5,
 	}
 }
 
@@ -274,16 +283,22 @@ Process :: struct {
 // Per-metrics of the task selected in the drawer, refreshed independently of
 // the process list so the detail page can show IO rates and GPU usage.
 Task_Metrics :: struct {
-	pid:          u32,
-	handles:      u32,
-	gpu:          f32,
-	read_bps:     f64,
-	write_bps:    f64,
-	prev_read:    u64,
-	prev_write:   u64,
-	prev_ms:      u64,
-	have_io_prev: bool,
-	cpu_samples:  [SAMPLE_COUNT]f32,
+	pid:              u32,
+	handles:          u32,
+	gpu:              f32,
+	read_bps:         f64,
+	write_bps:        f64,
+	prev_read:        u64,
+	prev_write:       u64,
+	prev_ms:          u64,
+	have_io_prev:     bool,
+	cpu_samples:      [SAMPLE_COUNT]f32,
+	mem_samples:      [SAMPLE_COUNT]f32,
+	gpu_samples:      [SAMPLE_COUNT]f32,
+	read_samples:     [SAMPLE_COUNT]f32,
+	write_samples:    [SAMPLE_COUNT]f32,
+	threads_samples:  [SAMPLE_COUNT]f32,
+	handles_samples:  [SAMPLE_COUNT]f32,
 }
 
 Fonts :: struct {
@@ -292,7 +307,7 @@ Fonts :: struct {
 
 Brushes :: struct {
 	bg, sidebar, card, selected, badge, accent,
-	track, thumb, cpu_fill, mem_fill, gpu_fill, gpu, grid, line, dark, light, muted: win.HBRUSH,
+	track, thumb, cpu_fill, mem_fill, gpu_fill, line, dark, light, muted: win.HBRUSH,
 }
 
 Pens :: struct {
@@ -324,13 +339,14 @@ App :: struct {
 
 	processes:       [MAX_PROCESSES]Process,
 	process_count:   int,
-	thread_count:    u32,
 	selected_pid:    u32,
 	has_selection:   bool,
 	scroll:          int,
 	last_process_ms: u64,
 	preview:         Window_Preview,
 	task:            Task_Metrics,
+	core_page:       int,
+	core_samples:    [MAX_CORES][SAMPLE_COUNT]f32,
 
 	cpu:         f32,
 	mem_percent: f32,
@@ -343,20 +359,12 @@ App :: struct {
 	core_prev:      [MAX_CORES]Core_Times,
 	have_core_prev: bool,
 
-	mem_available:    f32,
-	mem_committed:    f32,
-	mem_commit_limit: f32,
-	mem_cached:       f32,
-	mem_details_ok:   bool,
-	handle_count:     u32,
-
 	gpu:            f32,
 	gpu_vram:       f32,
 	gpu_ok:         bool,
 	gpu_mem_ok:     bool,
 	gpu_counter:    rawptr,
 	gpu_mem_counter: rawptr,
-	gpu_engine_usage: [GPU_ENGINE_COUNT]f32,
 
 	disk_read_bps:  f64,
 	disk_write_bps: f64,
@@ -479,6 +487,10 @@ tasks_geometry :: proc() -> Tasks_Geometry {
 		bottom = app.height
 	}
 	top := app.bar_h + pad
+	band_h := core_band_height()
+	if band_h > 0 {
+		top += band_h + S(14)
+	}
 	panel_bottom := bottom - pad
 	if panel_bottom <= top {
 		return {}
@@ -494,8 +506,186 @@ tasks_geometry :: proc() -> Tasks_Geometry {
 	return Tasks_Geometry{panel = panel, list_top = list_top, list_bottom = list_bottom, visible = visible}
 }
 
+// Full-width band above the task list and the monitoring column showing one
+// curve per CPU core.
+core_band_height :: proc() -> i32 {
+	if !settings.modules.cores || app.cores <= 0 || app.drawer_h <= 0 {
+		return 0
+	}
+	return clamp(app.drawer_h * 19 / 100, S(80), S(108))
+}
+
+Core_Band_Layout :: struct {
+	rect:   win.RECT,
+	header: win.RECT,
+	charts: win.RECT,
+	prev:   win.RECT,
+	next:   win.RECT,
+}
+
+core_band_layout :: proc() -> Core_Band_Layout {
+	layout := Core_Band_Layout{}
+	height := core_band_height()
+	if height <= 0 || app.width <= 0 {
+		return layout
+	}
+
+	pad := S(TASK_PANEL_PADDING_DIP)
+	top := app.bar_h + pad
+	layout.rect = win.RECT{pad, top, app.width - pad, top + height}
+
+	inner := S(16)
+	btn := S(22)
+	header_y := layout.rect.top + S(7)
+	layout.next = win.RECT{layout.rect.right - inner - btn, header_y, layout.rect.right - inner, header_y + btn}
+	layout.prev = win.RECT{layout.next.left - S(6) - btn, header_y, layout.next.left - S(6), header_y + btn}
+	layout.header = win.RECT{
+		layout.rect.left + inner,
+		layout.rect.top + S(7),
+		layout.prev.left - S(10),
+		layout.rect.top + S(29),
+	}
+	layout.charts = win.RECT{
+		layout.rect.left + inner,
+		layout.rect.top + S(32),
+		layout.rect.right - inner,
+		layout.rect.bottom - S(10),
+	}
+	return layout
+}
+
 visible_process_rows :: proc() -> int {
 	return tasks_geometry().visible
+}
+
+core_page_count :: proc() -> int {
+	per := core_page_per_core()
+	if per <= 0 || app.cores <= 0 {
+		return 1
+	}
+	return (app.cores + per - 1) / per
+}
+
+is_core_page_max :: proc() -> bool {
+	return settings.cores_per_page <= 0
+}
+
+is_core_page_custom :: proc() -> bool {
+	if settings.cores_per_page <= 0 {
+		return false
+	}
+	if settings.cores_custom_mode {
+		return true
+	}
+	v := settings.cores_per_page
+	return v != 4 && v != 6 && v != 8 && v != 16
+}
+
+core_page_per_core :: proc() -> int {
+	if app.cores <= 0 {
+		return 1
+	}
+	if is_core_page_max() {
+		return app.cores
+	}
+	return clamp(settings.cores_per_page, 1, app.cores)
+}
+
+clamp_core_page :: proc() {
+	pages := core_page_count()
+	if app.core_page >= pages {
+		app.core_page = pages - 1
+	}
+	if app.core_page < 0 {
+		app.core_page = 0
+	}
+}
+
+Task_View_Layout :: struct {
+	preview:      win.RECT,
+	detail:       win.RECT,
+	show_preview: bool,
+}
+
+// Right-hand area of the tasks drawer while a task is selected: the window
+// preview on the left, the task's monitoring column on the right.
+task_view_layout :: proc() -> Task_View_Layout {
+	geo := tasks_geometry()
+	layout := Task_View_Layout{}
+	left := geo.panel.right + S(18)
+	right := app.width - S(18)
+	if geo.panel.right <= geo.panel.left || right - left <= S(220) {
+		return layout
+	}
+
+	layout.detail = win.RECT{left, geo.panel.top, right, geo.panel.bottom}
+	if preview_is_alive() {
+		gap := S(18)
+		preview_w := clamp((right - left) * 46 / 100, S(320), S(900))
+		if right - left - preview_w - gap >= S(420) {
+			layout.preview = win.RECT{left, geo.panel.top, left + preview_w, geo.panel.bottom}
+			layout.detail = win.RECT{left + preview_w + gap, geo.panel.top, right, geo.panel.bottom}
+			layout.show_preview = true
+		}
+	}
+	return layout
+}
+
+Task_Detail_Layout :: struct {
+	title:    win.RECT,
+	cpu:      win.RECT,
+	memory:   win.RECT,
+	gpu:      win.RECT,
+	io_read:  win.RECT,
+	io_write: win.RECT,
+	threads:  win.RECT,
+	handles:  win.RECT,
+}
+
+// Monitoring column of the detail page: a headline CPU curve and three rows of
+// two metric cards.
+task_detail_layout :: proc(rect: win.RECT) -> Task_Detail_Layout {
+	layout := Task_Detail_Layout{}
+	width := rect.right - rect.left
+	height := rect.bottom - rect.top
+	if width < S(260) || height < S(200) {
+		return layout
+	}
+
+	gap := S(12)
+	title_h := S(30)
+	cpu_h := clamp(height * 22 / 100, S(60), S(124))
+
+	row_h := (height - title_h - cpu_h - 3*gap) / 3
+	if row_h < S(40) {
+		row_h = S(40)
+	}
+
+	half := (width - gap) / 2
+	layout.title = win.RECT{rect.left, rect.top, rect.right, rect.top + title_h}
+
+	y := rect.top + title_h
+	layout.cpu = win.RECT{rect.left, y, rect.right, y + cpu_h}
+	y += cpu_h + gap
+
+	if y + row_h <= rect.bottom {
+		layout.memory = win.RECT{rect.left, y, rect.left + half, y + row_h}
+		layout.gpu = win.RECT{rect.left + half + gap, y, rect.right, y + row_h}
+	}
+	y += row_h + gap
+
+	if y + row_h <= rect.bottom {
+		layout.io_read = win.RECT{rect.left, y, rect.left + half, y + row_h}
+		layout.io_write = win.RECT{rect.left + half + gap, y, rect.right, y + row_h}
+	}
+	y += row_h + gap
+
+	if y + row_h <= rect.bottom {
+		layout.threads = win.RECT{rect.left, y, rect.left + half, y + row_h}
+		layout.handles = win.RECT{rect.left + half + gap, y, rect.right, y + row_h}
+	}
+
+	return layout
 }
 
 clamp_scroll :: proc() {
@@ -550,6 +740,36 @@ settings_layout :: proc() -> Settings_Layout {
 settings_module_row :: proc(layout: Settings_Layout, index: int) -> win.RECT {
 	y := layout.modules.top + S(42) + i32(index)*S(36)
 	return win.RECT{layout.modules.left, y, layout.modules.right, y + S(36)}
+}
+
+settings_cores_label_y :: proc(layout: Settings_Layout) -> i32 {
+	return layout.modules.top + S(42) + 7*S(36) + S(14)
+}
+
+settings_cores_page_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
+	gap := S(6)
+	avail := layout.modules.right - layout.modules.left
+	w := clamp((avail - gap*5) / 6, S(34), S(52))
+	h := S(26)
+	x := layout.modules.left + i32(index)*(w + gap)
+	y := settings_cores_label_y(layout) + S(18)
+	return win.RECT{x, y, x + w, y + h}
+}
+
+settings_custom_row_y :: proc(layout: Settings_Layout) -> i32 {
+	return settings_cores_label_y(layout) + S(18) + S(26) + S(14)
+}
+
+settings_custom_minus_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	y := settings_custom_row_y(layout)
+	x := layout.modules.left + S(84)
+	return win.RECT{x, y, x + S(26), y + S(24)}
+}
+
+settings_custom_plus_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	minus := settings_custom_minus_rect(layout)
+	x := minus.right + S(44) + S(6)
+	return win.RECT{x, minus.top, x + S(26), minus.bottom}
 }
 
 settings_color_label_y :: proc(layout: Settings_Layout, role: int) -> i32 {
@@ -645,7 +865,6 @@ refresh_processes :: proc() {
 	entry.dwSize = u32(size_of(win.PROCESSENTRY32W))
 
 	count := 0
-	threads: u32 = 0
 
 	for status := win.Process32FirstW(snap, &entry); status; status = win.Process32NextW(snap, &entry) {
 		if count >= MAX_PROCESSES {
@@ -704,7 +923,6 @@ refresh_processes :: proc() {
 		}
 
 		count += 1
-		threads += p.threads
 	}
 
 	for i in 1..<count {
@@ -721,7 +939,6 @@ refresh_processes :: proc() {
 		app.processes[i] = next_processes[i]
 	}
 	app.process_count = count
-	app.thread_count = threads
 
 	if app.has_selection {
 		alive := false
@@ -738,20 +955,17 @@ refresh_processes :: proc() {
 		}
 	}
 
-	if app.has_selection && app.task.pid == app.selected_pid {
-		if p, found := find_process(app.selected_pid); found {
-			push_task_cpu_sample(p.cpu_percent)
-		}
-	}
-
 	clamp_scroll()
 }
 
-push_task_cpu_sample :: proc(v: f32) {
-	for i in 1..<SAMPLE_COUNT {
-		app.task.cpu_samples[i-1] = app.task.cpu_samples[i]
+push_sample :: proc(samples: []f32, v: f32) {
+	if len(samples) == 0 {
+		return
 	}
-	app.task.cpu_samples[SAMPLE_COUNT-1] = v
+	for i in 1..<len(samples) {
+		samples[i-1] = samples[i]
+	}
+	samples[len(samples)-1] = v
 }
 
 update_task_metrics :: proc(now: u64) {
@@ -766,38 +980,53 @@ update_task_metrics :: proc(now: u64) {
 	}
 
 	handle := win.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, win.FALSE, app.selected_pid)
-	if handle == nil {
-		return
-	}
-	defer win.CloseHandle(handle)
-
-	handles: u32
-	if GetProcessHandleCount(handle, &handles) {
-		app.task.handles = handles
-	}
-
-	io: Io_Counters
-	if GetProcessIoCounters(handle, &io) {
-		if app.task.have_io_prev && now > app.task.prev_ms {
-			seconds := f64(now - app.task.prev_ms) / 1000.0
-			if seconds > 0 {
-				read_delta: u64 = 0
-				if io.read_bytes >= app.task.prev_read {
-					read_delta = io.read_bytes - app.task.prev_read
-				}
-				write_delta: u64 = 0
-				if io.write_bytes >= app.task.prev_write {
-					write_delta = io.write_bytes - app.task.prev_write
-				}
-				app.task.read_bps = f64(read_delta) / seconds
-				app.task.write_bps = f64(write_delta) / seconds
-			}
+	if handle != nil {
+		handles: u32
+		if GetProcessHandleCount(handle, &handles) {
+			app.task.handles = handles
 		}
-		app.task.prev_read = io.read_bytes
-		app.task.prev_write = io.write_bytes
-		app.task.prev_ms = now
-		app.task.have_io_prev = true
+
+		io: Io_Counters
+		if GetProcessIoCounters(handle, &io) {
+			if app.task.have_io_prev && now > app.task.prev_ms {
+				seconds := f64(now - app.task.prev_ms) / 1000.0
+				if seconds > 0 {
+					read_delta: u64 = 0
+					if io.read_bytes >= app.task.prev_read {
+						read_delta = io.read_bytes - app.task.prev_read
+					}
+					write_delta: u64 = 0
+					if io.write_bytes >= app.task.prev_write {
+						write_delta = io.write_bytes - app.task.prev_write
+					}
+					app.task.read_bps = f64(read_delta) / seconds
+					app.task.write_bps = f64(write_delta) / seconds
+				}
+			}
+			app.task.prev_read = io.read_bytes
+			app.task.prev_write = io.write_bytes
+			app.task.prev_ms = now
+			app.task.have_io_prev = true
+		}
+		win.CloseHandle(handle)
 	}
+
+	cpu: f32 = 0
+	memory_mb: f32 = 0
+	threads: f32 = 0
+	if p, found := find_process(app.selected_pid); found {
+		cpu = p.cpu_percent
+		memory_mb = f32(f64(p.working_set) / (1024.0*1024.0))
+		threads = f32(p.threads)
+	}
+
+	push_sample(app.task.cpu_samples[:], cpu)
+	push_sample(app.task.mem_samples[:], memory_mb)
+	push_sample(app.task.threads_samples[:], threads)
+	push_sample(app.task.handles_samples[:], f32(app.task.handles))
+	push_sample(app.task.gpu_samples[:], app.task.gpu)
+	push_sample(app.task.read_samples[:], f32(app.task.read_bps))
+	push_sample(app.task.write_samples[:], f32(app.task.write_bps))
 }
 
 push_cpu_sample :: proc(v: f32) {
@@ -862,6 +1091,7 @@ update_core_usage :: proc() {
 
 	for i in 0..<app.cores {
 		app.core_prev[i] = times[i]
+		push_sample(app.core_samples[i][:], app.core_usage[i])
 	}
 	app.have_core_prev = true
 }
@@ -996,7 +1226,6 @@ update_pdh_rates :: proc() {
 				if v > 100 {
 					v = 100
 				}
-				app.gpu_engine_usage[i] = f32(v)
 				if v > overall {
 					overall = v
 				}
@@ -1177,17 +1406,6 @@ update_metrics :: proc() {
 		}
 	}
 
-	perf: Performance_Information
-	perf.cb = u32(size_of(Performance_Information))
-	if GetPerformanceInfo(&perf, perf.cb) {
-		page := f64(perf.page_size)
-		app.mem_available = f32(f64(perf.physical_available) * page / GIB)
-		app.mem_committed = f32(f64(perf.commit_total) * page / GIB)
-		app.mem_commit_limit = f32(f64(perf.commit_limit) * page / GIB)
-		app.mem_cached = f32(f64(perf.system_cache) * page / GIB)
-		app.handle_count = perf.handle_count
-		app.mem_details_ok = true
-	}
 	push_mem_sample(app.mem_percent)
 
 	update_pdh_rates()
@@ -1320,8 +1538,52 @@ settings_toggle_module :: proc(id: Module_Id) {
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
+settings_set_cores_per_page :: proc(per: int) {
+	if per < 0 || per > MAX_CORES {
+		return
+	}
+	settings.cores_per_page = per
+	if per <= 0 {
+		settings.cores_custom_mode = false
+	} else if per == 4 || per == 6 || per == 8 || per == 16 {
+		settings.cores_custom_mode = false
+	} else {
+		settings.cores_custom_mode = true
+		settings.cores_custom = per
+	}
+	app.core_page = 0
+	clamp_core_page()
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+settings_use_custom_cores :: proc() {
+	max_per := max(app.cores, 1)
+	settings.cores_custom_mode = true
+	settings.cores_custom = clamp(settings.cores_custom, 1, max_per)
+	settings.cores_per_page = settings.cores_custom
+	app.core_page = 0
+	clamp_core_page()
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+settings_adjust_custom_cores :: proc(delta: int) {
+	max_per := max(app.cores, 1)
+	base := clamp(settings.cores_per_page, 1, max_per)
+	per := clamp(base + delta, 1, max_per)
+	settings.cores_custom = per
+	settings.cores_per_page = per
+	settings.cores_custom_mode = true
+	app.core_page = 0
+	clamp_core_page()
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 reset_settings :: proc() {
 	settings = default_settings()
+	app.core_page = 0
 	save_settings()
 	apply_visual_settings()
 }
@@ -1416,6 +1678,15 @@ parse_settings :: proc(text: string) {
 			}
 		case "theme":
 			settings.theme = clamp(parse_int(value), 0, len(THEMES)-1)
+		case "cores_per_page":
+			per := parse_int(value)
+			if per >= 0 && per <= MAX_CORES {
+				settings.cores_per_page = per
+			}
+		case "cores_custom":
+			settings.cores_custom = clamp(parse_int(value), 1, MAX_CORES)
+		case "cores_custom_mode":
+			settings.cores_custom_mode = parse_bool(value)
 		}
 	}
 
@@ -1423,6 +1694,11 @@ parse_settings :: proc(text: string) {
 		settings.modules.cores = false
 	}
 	settings.theme = clamp(settings.theme, 0, len(THEMES)-1)
+	if settings.cores_per_page <= 0 {
+		settings.cores_custom_mode = false
+	} else if settings.cores_custom_mode {
+		settings.cores_custom = clamp(settings.cores_per_page, 1, MAX_CORES)
+	}
 }
 
 settings_file_path :: proc(dir_buf, path_buf: []u8) -> (dir: string, path: string) {
@@ -1462,7 +1738,7 @@ save_settings :: proc() {
 	content := fmt.bprintf(
 		buf[:],
 		"version=1\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
-		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\n",
+		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -1474,6 +1750,9 @@ save_settings :: proc() {
 		settings.memory_color[0], settings.memory_color[1], settings.memory_color[2],
 		settings.gpu_color[0], settings.gpu_color[1], settings.gpu_color[2],
 		settings.theme,
+		settings.cores_per_page,
+		settings.cores_custom,
+		int(settings.cores_custom_mode),
 	)
 	_ = os.write_entire_file(path, content)
 }
@@ -1515,8 +1794,6 @@ create_visual_objects :: proc() {
 	app.brushes.cpu_fill = win.CreateSolidBrush(colorref(mix_color(theme.card, accent, 0.22)))
 	app.brushes.mem_fill = win.CreateSolidBrush(colorref(mix_color(theme.card, mem_color, 0.22)))
 	app.brushes.gpu_fill = win.CreateSolidBrush(colorref(mix_color(theme.card, gpu_color, 0.22)))
-	app.brushes.gpu = win.CreateSolidBrush(colorref(gpu_color))
-	app.brushes.grid = win.CreateSolidBrush(colorref(theme.line))
 	app.brushes.line = win.CreateSolidBrush(colorref(theme.line))
 	app.brushes.dark = win.CreateSolidBrush(colorref(COL_BADGE_TEXT))
 	app.brushes.light = win.CreateSolidBrush(colorref(COL_TEXT))
@@ -1541,8 +1818,6 @@ delete_visual_objects :: proc() {
 	delete_gdi(app.brushes.cpu_fill)
 	delete_gdi(app.brushes.mem_fill)
 	delete_gdi(app.brushes.gpu_fill)
-	delete_gdi(app.brushes.gpu)
-	delete_gdi(app.brushes.grid)
 	delete_gdi(app.brushes.line)
 	delete_gdi(app.brushes.dark)
 	delete_gdi(app.brushes.light)

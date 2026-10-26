@@ -86,25 +86,6 @@ foreign ntdll {
 	) -> i32 ---
 }
 
-Performance_Information :: struct {
-	cb:                 u32,
-	commit_total:       uint,
-	commit_limit:       uint,
-	commit_peak:        uint,
-	physical_total:     uint,
-	physical_available: uint,
-	system_cache:       uint,
-	kernel_total:       uint,
-	kernel_paged:       uint,
-	kernel_nonpaged:    uint,
-	page_size:          uint,
-	handle_count:       u32,
-	process_count:      u32,
-	thread_count:       u32,
-}
-
-#assert(size_of(Performance_Information) == 104)
-
 Process_Memory_Counters :: struct {
 	cb:                           u32,
 	page_fault_count:             u32,
@@ -122,7 +103,6 @@ Process_Memory_Counters :: struct {
 
 @(default_calling_convention="system")
 foreign psapi {
-	GetPerformanceInfo :: proc(info: ^Performance_Information, size: u32) -> win.BOOL ---
 	GetProcessMemoryInfo :: proc(process: win.HANDLE, counters: ^Process_Memory_Counters, size: u32) -> win.BOOL ---
 }
 
@@ -211,7 +191,6 @@ DWM_TNP_RECTDESTINATION      :: 0x0000_0001
 DWM_TNP_RECTSOURCE           :: 0x0000_0002
 DWM_TNP_OPACITY              :: 0x0000_0004
 DWM_TNP_VISIBLE              :: 0x0000_0008
-DWM_TNP_SOURCECLIENTAREAONLY :: 0x0000_0010
 
 Dwm_Thumbnail_Properties :: struct {
 	dw_flags:                u32,
