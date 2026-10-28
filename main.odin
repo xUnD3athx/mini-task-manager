@@ -83,7 +83,12 @@ hinstance := win.HINSTANCE(win.GetModuleHandleW(nil))
 	services.refresh_processes()
 	services.update_metrics()
 
-	ex_style := win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST
+	// Only the appbar has to sit above other windows; a standalone window
+	// behaves like a normal one.
+	ex_style := win.WS_EX_TOOLWINDOW
+	if core.settings.dock == .top {
+		ex_style |= win.WS_EX_TOPMOST
+	}
 	start_w := core.app.screen_w
 	if core.settings.dock == .standalone {
 		start_w = core.app.standalone_w
@@ -331,13 +336,21 @@ drawer_open_height :: proc() -> i32 {
 	return height
 }
 
+// The appbar must stay above other windows; the floating window must not.
+window_z_order :: proc() -> win.HWND {
+	if core.settings.dock == .top {
+		return win.HWND_TOPMOST
+	}
+	return win.HWND_NOTOPMOST
+}
+
 set_window_height :: proc(height: i32) {
 	if core.app.hwnd == nil || height <= 0 {
 		return
 	}
 	_ = win.SetWindowPos(
 		core.app.hwnd,
-		win.HWND_TOPMOST,
+		window_z_order(),
 		core.app.bar_rect.left,
 		core.app.bar_rect.top,
 		core.app.bar_rect.right - core.app.bar_rect.left,
@@ -505,7 +518,7 @@ lift_standalone_open :: proc() {
 	core.app.standalone_pos.y = max_y
 	_ = win.SetWindowPos(
 		core.app.hwnd,
-		win.HWND_TOPMOST,
+		win.HWND_NOTOPMOST,
 		core.app.bar_rect.left,
 		max_y,
 		core.app.bar_rect.right - core.app.bar_rect.left,
