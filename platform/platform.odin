@@ -65,7 +65,6 @@ foreign user32 {
 
 @(default_calling_convention="system")
 foreign gdi32 {
-	Polyline :: proc(hdc: win.HDC, points: [^]win.POINT, count: i32) -> win.BOOL ---
 	SetViewportOrgEx :: proc(hdc: win.HDC, x, y: i32, previous: ^win.POINT) -> win.BOOL ---
 }
 
@@ -236,6 +235,7 @@ foreign iphlpapi {
 }
 
 foreign import dwmapi "system:Dwmapi.lib"
+foreign import gdiplus "system:Gdiplus.lib"
 
 DWM_TNP_RECTDESTINATION      :: 0x0000_0001
 DWM_TNP_RECTSOURCE           :: 0x0000_0002
@@ -291,3 +291,67 @@ DT_SINGLELINE   :: u32(0x00000020)
 DT_END_ELLIPSIS :: u32(0x00008000)
 DT_NOPREFIX     :: u32(0x00000800)
 DT_CALCRECT     :: u32(0x00000400)
+
+SMOOTHING_MODE_ANTIALIAS :: 4
+PIXEL_OFFSET_MODE_HALF    :: 4
+GDIP_FILL_MODE_WINDING    :: 1
+GDIP_UNIT_PIXEL           :: 2
+GDIP_LINE_JOIN_ROUND      :: 2
+
+Gp_Point_F :: struct {
+	x: f32,
+	y: f32,
+}
+
+Gdiplus_Startup_Input :: struct {
+	version:                    u32,
+	debug_event_callback:       rawptr,
+	suppress_background_thread: win.BOOL,
+	suppress_external_codecs:   win.BOOL,
+}
+
+@(default_calling_convention="system")
+foreign gdiplus {
+	GdiplusStartup :: proc(
+		token:  ^uintptr,
+		input:  ^Gdiplus_Startup_Input,
+		output: rawptr,
+	) -> i32 ---
+	GdiplusShutdown :: proc(token: uintptr) ---
+
+	GdipCreateFromHDC :: proc(hdc: win.HDC, graphics: ^rawptr) -> i32 ---
+	GdipDeleteGraphics :: proc(graphics: rawptr) -> i32 ---
+	GdipSetSmoothingMode :: proc(graphics: rawptr, mode: i32) -> i32 ---
+	GdipSetPixelOffsetMode :: proc(graphics: rawptr, mode: i32) -> i32 ---
+
+	GdipCreateSolidFill :: proc(color: u32, brush: ^rawptr) -> i32 ---
+	GdipDeleteBrush :: proc(brush: rawptr) -> i32 ---
+	GdipCreatePen1 :: proc(color: u32, width: f32, unit: i32, pen: ^rawptr) -> i32 ---
+	GdipDeletePen :: proc(pen: rawptr) -> i32 ---
+	GdipSetPenLineJoin :: proc(pen: rawptr, join: i32) -> i32 ---
+
+	GdipCreatePath :: proc(fill_mode: i32, path: ^rawptr) -> i32 ---
+	GdipDeletePath :: proc(path: rawptr) -> i32 ---
+	GdipAddPathArc :: proc(
+		path: rawptr,
+		x, y, width, height: f32,
+		start_angle, sweep_angle: f32,
+	) -> i32 ---
+	GdipAddPathRectangle :: proc(path: rawptr, x, y, width, height: f32) -> i32 ---
+	GdipClosePathFigure :: proc(path: rawptr) -> i32 ---
+	GdipFillPath :: proc(graphics: rawptr, brush: rawptr, path: rawptr) -> i32 ---
+	GdipDrawPath :: proc(graphics: rawptr, pen: rawptr, path: rawptr) -> i32 ---
+	GdipFillPolygon :: proc(
+		graphics: rawptr,
+		brush:    rawptr,
+		points:   [^]Gp_Point_F,
+		count:    i32,
+		fill_mode: i32,
+	) -> i32 ---
+	GdipDrawLines :: proc(
+		graphics: rawptr,
+		pen:      rawptr,
+		points:   [^]Gp_Point_F,
+		count:    i32,
+	) -> i32 ---
+}

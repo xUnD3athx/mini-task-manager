@@ -41,6 +41,12 @@ main :: proc() {
 
 	core.load_settings()
 
+	startup: platform.Gdiplus_Startup_Input
+	startup.version = 1
+	if platform.GdiplusStartup(&core.app.gdiplus_token, &startup, nil) != 0 {
+		core.app.gdiplus_token = 0
+	}
+
 	core.app.class_brush = win.CreateSolidBrush(core.colorref(core.theme_bg()))
 	defer _ = win.DeleteObject(win.HGDIOBJ(core.app.class_brush))
 
@@ -447,4 +453,9 @@ destroy_resources :: proc() {
 	core.delete_gdi(core.app.fonts.badge)
 
 	core.delete_visual_objects()
+
+	if core.app.gdiplus_token != 0 {
+		platform.GdiplusShutdown(core.app.gdiplus_token)
+		core.app.gdiplus_token = 0
+	}
 }

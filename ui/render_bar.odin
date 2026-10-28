@@ -373,8 +373,8 @@ draw_sparkline :: proc(
 		return
 	}
 
-	points: [core.SAMPLE_COUNT + 2]win.POINT
-	points[0] = win.POINT{rect.left, rect.bottom}
+	points: [core.SAMPLE_COUNT + 2]platform.Gp_Point_F
+	points[0] = {f32(rect.left), f32(rect.bottom)}
 
 	for i in 0..<count {
 		v := samples[i]
@@ -386,14 +386,28 @@ draw_sparkline :: proc(
 		}
 		px := rect.left + i32(i)*(width - 1)/i32(count - 1)
 		py := rect.bottom - i32(v*f32(height)/scale)
-		points[i + 1] = win.POINT{px, py}
+		points[i + 1] = {f32(px), f32(py)}
 	}
-	points[count + 1] = win.POINT{rect.right, rect.bottom}
+	points[count + 1] = {f32(rect.right), f32(rect.bottom)}
 
-	_ = win.SelectObject(dc, win.HGDIOBJ(fill_brush))
-	_ = win.SelectObject(dc, win.HGDIOBJ(core.app.pens.null))
-	_ = win.Polygon(dc, raw_data(points[:]), i32(count + 2))
+	if gfx == nil {
+		return
+	}
 
-	_ = win.SelectObject(dc, win.HGDIOBJ(line_pen))
-	_ = platform.Polyline(dc, raw_data(points[1:]), i32(count))
+	if fill, ok := core.brush_color_of(fill_brush); ok {
+		brush: rawptr
+		if platform.GdipCreateSolidFill(argb(fill), &brush) == 0 {
+			_ = platform.GdipFillPolygon(gfx, brush, raw_data(points[:]), i32(count + 2), platform.GDIP_FILL_MODE_WINDING)
+			_ = platform.GdipDeleteBrush(brush)
+		}
+	}
+
+	if color, ok, line_width := core.pen_style_of(line_pen); ok {
+		pen: rawptr
+		if platform.GdipCreatePen1(argb(color), f32(max(line_width, 1)), platform.GDIP_UNIT_PIXEL, &pen) == 0 {
+			_ = platform.GdipSetPenLineJoin(pen, platform.GDIP_LINE_JOIN_ROUND)
+			_ = platform.GdipDrawLines(gfx, pen, raw_data(points[1:]), i32(count))
+			_ = platform.GdipDeletePen(pen)
+		}
+	}
 }

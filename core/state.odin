@@ -463,6 +463,59 @@ Pens :: struct {
 	border, cpu, mem, gpu, null: win.HPEN,
 }
 
+// GDI+ draws shapes from colours, not GDI handles, so every theme brush/pen is
+// registered with the colour it was created from. The UI resolves handles
+// through this table when rendering anti-aliased geometry.
+Brush_Color :: struct {
+	handle: win.HBRUSH,
+	color:  Color,
+}
+
+Pen_Style :: struct {
+	handle: win.HPEN,
+	color:  Color,
+	width:  i32,
+}
+
+brush_colors: [24]Brush_Color
+brush_color_count: int
+pen_styles: [8]Pen_Style
+pen_style_count: int
+
+register_brush :: proc(handle: win.HBRUSH, color: Color) {
+	if handle == nil || brush_color_count >= len(brush_colors) {
+		return
+	}
+	brush_colors[brush_color_count] = Brush_Color{handle = handle, color = color}
+	brush_color_count += 1
+}
+
+register_pen :: proc(handle: win.HPEN, color: Color, width: i32) {
+	if handle == nil || pen_style_count >= len(pen_styles) {
+		return
+	}
+	pen_styles[pen_style_count] = Pen_Style{handle = handle, color = color, width = width}
+	pen_style_count += 1
+}
+
+brush_color_of :: proc(handle: win.HBRUSH) -> (Color, bool) {
+	for i in 0..<brush_color_count {
+		if brush_colors[i].handle == handle {
+			return brush_colors[i].color, true
+		}
+	}
+	return {}, false
+}
+
+pen_style_of :: proc(handle: win.HPEN) -> (Color, bool, i32) {
+	for i in 0..<pen_style_count {
+		if pen_styles[i].handle == handle {
+			return pen_styles[i].color, true, pen_styles[i].width
+		}
+	}
+	return {}, false, 0
+}
+
 Window_Preview :: struct {
 	hwnd:      win.HWND,
 	thumbnail: win.HANDLE,
@@ -475,6 +528,7 @@ Window_Preview :: struct {
 App :: struct {
 	hwnd:  win.HWND,
 	scale: f32,
+	gdiplus_token: uintptr,
 
 	screen_w, screen_h: i32,
 	bar_h:              i32,
