@@ -146,6 +146,7 @@ window_proc :: proc "system" (
 			services.update_metrics()
 			if platform.GetTickCount64() - core.app.last_process_ms >= core.PROCESS_REFRESH_MS {
 				services.refresh_processes()
+				ui.clamp_scroll()
 			}
 			services.refresh_window_preview()
 			_ = win.InvalidateRect(hwnd, nil, win.FALSE)

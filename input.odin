@@ -59,7 +59,7 @@ handle_tasks_click :: proc(x, y: i32) {
 
 	for i in 0..<len(core.SORT_FIELD_LABELS) {
 		if core.point_in_rect(x, y, ui.task_sort_chip_rect(geo.panel, i)) {
-			services.settings_set_sort(core.Sort_Field(i))
+			settings_set_sort(core.Sort_Field(i))
 			return
 		}
 	}
@@ -321,6 +321,19 @@ settings_adjust_custom_cores :: proc(delta: int) {
 	core.settings.cores_custom_mode = true
 	core.app.core_page = 0
 	ui.clamp_core_page()
+	core.save_settings()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+settings_set_sort :: proc(field: core.Sort_Field) {
+	if core.settings.sort_field == field {
+		core.settings.sort_desc = !core.settings.sort_desc
+	} else {
+		core.settings.sort_field = field
+		core.settings.sort_desc = true
+	}
+	services.sort_processes(core.app.processes[:core.app.process_count])
+	services.build_task_groups()
 	core.save_settings()
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }

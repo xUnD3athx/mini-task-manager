@@ -11,7 +11,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 	layout := settings_layout()
 	draw_card(dc, layout.outer)
 
-	draw_text(dc, "core.Settings", layout.outer.left + core.dip(24), layout.outer.top + core.dip(16),
+	draw_text(dc, "Settings", layout.outer.left + core.dip(24), layout.outer.top + core.dip(16),
 		core.dip(240), core.dip(30), core.app.fonts.title, core.COL_TEXT, platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	draw_text(dc, "Modules, colors, refresh and theme", layout.outer.left + core.dip(24), layout.outer.top + core.dip(44),
 		core.dip(420), core.dip(16), core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)

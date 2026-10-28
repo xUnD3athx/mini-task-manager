@@ -469,17 +469,3 @@ update_task_metrics :: proc() {
 	push_sample(t.read_samples[:], f32(t.read_bps))
 	push_sample(t.write_samples[:], f32(t.write_bps))
 }
-
-// settings_set_sort switches the active sort field and rebuilds the tree.
-settings_set_sort :: proc(field: core.Sort_Field) {
-	if core.settings.sort_field == field {
-		core.settings.sort_desc = !core.settings.sort_desc
-	} else {
-		core.settings.sort_field = field
-		core.settings.sort_desc = true
-	}
-	sort_processes(core.app.processes[:core.app.process_count])
-	build_task_groups()
-	core.save_settings()
-	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
-}
