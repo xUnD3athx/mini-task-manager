@@ -1,6 +1,10 @@
 package main
 
 import win "core:sys/windows"
+import "core"
+import "platform"
+import "services"
+import "ui"
 
 // 鼠标/键盘输入：只修改状态，不绘制。
 
@@ -8,23 +12,23 @@ handle_click :: proc(lparam: win.LPARAM) {
 	x := i32(lparam & 0xffff)
 	y := i32((lparam >> 16) & 0xffff)
 
-	if bar_y := y - bar_top(); bar_y >= 0 && bar_y < app.bar_h {
-		if point_in_rect(x, bar_y, tasks_button_rect()) {
+	if bar_y := y - ui.bar_top(); bar_y >= 0 && bar_y < core.app.bar_h {
+		if core.point_in_rect(x, bar_y, ui.tasks_button_rect()) {
 			toggle_view(.tasks)
 			return
 		}
-		if point_in_rect(x, bar_y, settings_button_rect()) {
+		if core.point_in_rect(x, bar_y, ui.settings_button_rect()) {
 			toggle_view(.settings)
 			return
 		}
-		if point_in_rect(x, bar_y, exit_button_rect()) {
-			_ = win.PostMessageW(app.hwnd, win.WM_CLOSE, 0, 0)
+		if core.point_in_rect(x, bar_y, ui.exit_button_rect()) {
+			_ = win.PostMessageW(core.app.hwnd, win.WM_CLOSE, 0, 0)
 			return
 		}
 		return
 	}
 
-	switch app.view {
+	switch core.app.view {
 	case .tasks:
 		handle_tasks_click(x, y)
 	case .settings:
@@ -34,28 +38,28 @@ handle_click :: proc(lparam: win.LPARAM) {
 }
 
 handle_tasks_click :: proc(x, y: i32) {
-	band := core_band_layout()
-	if point_in_rect(x, y, band.prev) {
-		app.core_page -= 1
-		clamp_core_page()
-		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+	band := ui.core_band_layout()
+	if core.point_in_rect(x, y, band.prev) {
+		core.app.core_page -= 1
+		ui.clamp_core_page()
+		_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		return
 	}
-	if point_in_rect(x, y, band.next) {
-		app.core_page += 1
-		clamp_core_page()
-		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+	if core.point_in_rect(x, y, band.next) {
+		core.app.core_page += 1
+		ui.clamp_core_page()
+		_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		return
 	}
 
-	geo := tasks_geometry()
+	geo := ui.tasks_geometry()
 	if geo.visible <= 0 || geo.panel.right <= geo.panel.left {
 		return
 	}
 
-	for i in 0..<len(SORT_FIELD_LABELS) {
-		if point_in_rect(x, y, task_sort_chip_rect(geo.panel, i)) {
-			settings_set_sort(Sort_Field(i))
+	for i in 0..<len(core.SORT_FIELD_LABELS) {
+		if core.point_in_rect(x, y, ui.task_sort_chip_rect(geo.panel, i)) {
+			services.settings_set_sort(core.Sort_Field(i))
 			return
 		}
 	}
@@ -64,72 +68,72 @@ handle_tasks_click :: proc(x, y: i32) {
 		return
 	}
 
-	row := int((y - geo.list_top) / dip(TASK_ROW_HEIGHT_DIP))
-	index := app.scroll + row
-	if row < geo.visible && index >= 0 && index < app.task_row_count {
-		item := app.task_rows[index]
+	row := int((y - geo.list_top) / core.dip(core.TASK_ROW_HEIGHT_DIP))
+	index := core.app.scroll + row
+	if row < geo.visible && index >= 0 && index < core.app.task_row_count {
+		item := core.app.task_rows[index]
 		switch item.kind {
 		case .group:
-			g := &app.groups[item.index]
+			g := &core.app.groups[item.index]
 			// Only the triangle toggles the subtree; the rest of the row selects
 			// the whole application.
-			if x < geo.panel.left + dip(34) {
-				group_set_expanded(g.name, !group_is_expanded(g.name))
-				rebuild_task_rows()
-				clamp_scroll()
-				_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+			if x < geo.panel.left + core.dip(34) {
+				services.group_set_expanded(g.name, !services.group_is_expanded(g.name))
+				services.rebuild_task_rows()
+				ui.clamp_scroll()
+				_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 				return
 			}
 
-			if !app.group_selected || !same_task_name(app.selected_group, g.name) {
-				app.task = Task_Metrics{group_mode = true, group = g.name}
+			if !core.app.group_selected || !services.same_task_name(core.app.selected_group, g.name) {
+				core.app.task = core.Task_Metrics{group_mode = true, group = g.name}
 			}
-			app.selected_group = g.name
-			app.group_selected = true
-			app.has_selection = true
-			refresh_window_preview()
-			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+			core.app.selected_group = g.name
+			core.app.group_selected = true
+			core.app.has_selection = true
+			services.refresh_window_preview()
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		case .process:
-			p := &app.processes[item.index]
-			if app.group_selected || p.pid != app.selected_pid {
-				app.task = Task_Metrics{pid = p.pid}
+			p := &core.app.processes[item.index]
+			if core.app.group_selected || p.pid != core.app.selected_pid {
+				core.app.task = core.Task_Metrics{pid = p.pid}
 			}
-			app.selected_pid = p.pid
-			app.group_selected = false
-			app.has_selection = true
-			refresh_window_preview()
-			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+			core.app.selected_pid = p.pid
+			core.app.group_selected = false
+			core.app.has_selection = true
+			services.refresh_window_preview()
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		}
 	}
 }
 
 handle_settings_click :: proc(x, y: i32) {
-	layout := settings_layout()
+	layout := ui.settings_layout()
 
 	// Clicking anywhere else finishes an in-progress interval edit.
-	if app.refresh_edit {
-		commit_refresh_edit()
+	if core.app.refresh_edit {
+		core.commit_refresh_edit()
 	}
 
-	if point_in_rect(x, y, layout.reset) {
-		reset_settings()
+	if core.point_in_rect(x, y, layout.reset) {
+		core.reset_settings()
 		return
 	}
 
 	for i in 0..<7 {
-		if point_in_rect(x, y, settings_module_row(layout, i)) {
-			id := Module_Id(i)
-			if id == .cores && !settings.modules.cpu {
+		if core.point_in_rect(x, y, ui.settings_module_row(layout, i)) {
+			id := core.Module_Id(i)
+			if id == .cores && !core.settings.modules.cpu {
 				return
 			}
-			settings_toggle_module(id)
+			core.settings_toggle_module(id)
 			return
 		}
 	}
 
-	options := CORE_PAGE_OPTIONS
+	options := core.CORE_PAGE_OPTIONS
 	for i in 0..<len(options) {
-		if point_in_rect(x, y, settings_cores_page_rect(layout, i)) {
+		if core.point_in_rect(x, y, ui.settings_cores_page_rect(layout, i)) {
 			if options[i] < 0 {
 				settings_use_custom_cores()
 			} else {
@@ -139,68 +143,68 @@ handle_settings_click :: proc(x, y: i32) {
 		}
 	}
 
-	if is_core_page_custom() {
-		if point_in_rect(x, y, settings_custom_minus_rect(layout)) {
+	if ui.is_core_page_custom() {
+		if core.point_in_rect(x, y, ui.settings_custom_minus_rect(layout)) {
 			settings_adjust_custom_cores(-1)
 			return
 		}
-		if point_in_rect(x, y, settings_custom_plus_rect(layout)) {
+		if core.point_in_rect(x, y, ui.settings_custom_plus_rect(layout)) {
 			settings_adjust_custom_cores(1)
 			return
 		}
 	}
 
 	for role in 0..<3 {
-		palette := palette_for_role(role)
+		palette := core.palette_for_role(role)
 		for i in 0..<len(palette) {
-			if point_in_rect(x, y, settings_swatch_rect(layout, role, i)) {
-				settings_set_color(role, palette[i])
+			if core.point_in_rect(x, y, ui.settings_swatch_rect(layout, role, i)) {
+				core.settings_set_color(role, palette[i])
 				return
 			}
 		}
-		if point_in_rect(x, y, settings_custom_rect(layout, role)) {
-			open_color_picker(role)
+		if core.point_in_rect(x, y, ui.settings_custom_rect(layout, role)) {
+			core.open_color_picker(role)
 			return
 		}
 	}
 
-	for i in 0..<len(THEMES) {
-		if point_in_rect(x, y, settings_theme_rect(layout, i)) {
-			settings_set_theme(i)
+	for i in 0..<len(core.THEMES) {
+		if core.point_in_rect(x, y, ui.settings_theme_rect(layout, i)) {
+			core.settings_set_theme(i)
 			return
 		}
 	}
 
-	refresh_options := REFRESH_OPTIONS
+	refresh_options := core.REFRESH_OPTIONS
 	for i in 0..<len(refresh_options) {
-		if point_in_rect(x, y, settings_refresh_chip_rect(layout, i)) {
+		if core.point_in_rect(x, y, ui.settings_refresh_chip_rect(layout, i)) {
 			if refresh_options[i] < 0 {
-				settings_use_custom_refresh()
+				core.settings_use_custom_refresh()
 			} else {
-				settings_set_refresh_ms(refresh_options[i])
+				core.settings_set_refresh_ms(refresh_options[i])
 			}
 			return
 		}
 	}
 
-	if is_refresh_custom() {
-		if point_in_rect(x, y, settings_refresh_minus_rect(layout)) {
-			settings_adjust_custom_refresh(-REFRESH_STEP_MS)
+	if core.is_refresh_custom() {
+		if core.point_in_rect(x, y, ui.settings_refresh_minus_rect(layout)) {
+			core.settings_adjust_custom_refresh(-core.REFRESH_STEP_MS)
 			return
 		}
-		if point_in_rect(x, y, settings_refresh_plus_rect(layout)) {
-			settings_adjust_custom_refresh(REFRESH_STEP_MS)
+		if core.point_in_rect(x, y, ui.settings_refresh_plus_rect(layout)) {
+			core.settings_adjust_custom_refresh(core.REFRESH_STEP_MS)
 			return
 		}
-		if point_in_rect(x, y, settings_refresh_value_rect(layout)) {
-			begin_refresh_edit()
+		if core.point_in_rect(x, y, ui.settings_refresh_value_rect(layout)) {
+			core.begin_refresh_edit()
 			return
 		}
 	}
 
-	dock_modes := [2]Dock_Mode{.top, .bottom}
+	dock_modes := [2]core.Dock_Mode{.top, .bottom}
 	for i in 0..<len(dock_modes) {
-		if point_in_rect(x, y, settings_dock_chip_rect(layout, i)) {
+		if core.point_in_rect(x, y, ui.settings_dock_chip_rect(layout, i)) {
 			settings_set_dock(dock_modes[i])
 			return
 		}
@@ -210,39 +214,39 @@ handle_settings_click :: proc(x, y: i32) {
 handle_refresh_edit_char :: proc(ch: int) {
 	switch ch {
 	case '0'..='9':
-		if app.refresh_edit_len < len(app.refresh_edit_buf) {
+		if core.app.refresh_edit_len < len(core.app.refresh_edit_buf) {
 			// The field opens with the current value selected; the first digit
 			// types over it instead of appending.
-			if app.refresh_edit_replace {
-				app.refresh_edit_len = 0
-				app.refresh_edit_replace = false
+			if core.app.refresh_edit_replace {
+				core.app.refresh_edit_len = 0
+				core.app.refresh_edit_replace = false
 			}
-			app.refresh_edit_buf[app.refresh_edit_len] = u8(ch)
-			app.refresh_edit_len += 1
-			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+			core.app.refresh_edit_buf[core.app.refresh_edit_len] = u8(ch)
+			core.app.refresh_edit_len += 1
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		}
 	case 8: // backspace
-		app.refresh_edit_replace = false
-		if app.refresh_edit_len > 0 {
-			app.refresh_edit_len -= 1
-			_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		core.app.refresh_edit_replace = false
+		if core.app.refresh_edit_len > 0 {
+			core.app.refresh_edit_len -= 1
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		}
 	case 13: // enter
-		commit_refresh_edit()
+		core.commit_refresh_edit()
 	case 27: // escape
-		cancel_refresh_edit()
+		core.cancel_refresh_edit()
 	}
 }
 
 handle_wheel :: proc(wparam: win.WPARAM) {
-	if app.view != .tasks {
+	if core.app.view != .tasks {
 		return
 	}
 
 	pts: win.POINT
 	_ = win.GetCursorPos(&pts)
-	_ = win.ScreenToClient(app.hwnd, &pts)
-	geo := tasks_geometry()
+	_ = win.ScreenToClient(core.app.hwnd, &pts)
+	geo := ui.tasks_geometry()
 	if pts.x < geo.panel.left || pts.x >= geo.panel.right ||
 	   pts.y < geo.list_top || pts.y >= geo.list_bottom {
 		return
@@ -258,7 +262,65 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		}
 	}
 
-	app.scroll -= int(steps) * 3
-	clamp_scroll()
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+	core.app.scroll -= int(steps) * 3
+	ui.clamp_scroll()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+settings_set_dock :: proc(mode: core.Dock_Mode) {
+	if core.settings.dock == mode {
+		return
+	}
+	core.settings.dock = mode
+	core.app.deactivate_guard_until = platform.GetTickCount64() + 600
+	core.save_settings()
+
+	if !core.app.appbar_registered {
+		register_appbar(core.app.hwnd)
+	}
+	position_appbar(core.app.hwnd)
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+settings_set_cores_per_page :: proc(per: int) {
+	if per < 0 || per > core.MAX_CORES {
+		return
+	}
+	core.settings.cores_per_page = per
+	if per <= 0 {
+		core.settings.cores_custom_mode = false
+	} else if per == 4 || per == 6 || per == 8 || per == 16 {
+		core.settings.cores_custom_mode = false
+	} else {
+		core.settings.cores_custom_mode = true
+		core.settings.cores_custom = per
+	}
+	core.app.core_page = 0
+	ui.clamp_core_page()
+	core.save_settings()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+settings_use_custom_cores :: proc() {
+	max_per := max(core.app.cores, 1)
+	core.settings.cores_custom_mode = true
+	core.settings.cores_custom = clamp(core.settings.cores_custom, 1, max_per)
+	core.settings.cores_per_page = core.settings.cores_custom
+	core.app.core_page = 0
+	ui.clamp_core_page()
+	core.save_settings()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+settings_adjust_custom_cores :: proc(delta: int) {
+	max_per := max(core.app.cores, 1)
+	base := clamp(core.settings.cores_per_page, 1, max_per)
+	per := clamp(base + delta, 1, max_per)
+	core.settings.cores_custom = per
+	core.settings.cores_per_page = per
+	core.settings.cores_custom_mode = true
+	core.app.core_page = 0
+	ui.clamp_core_page()
+	core.save_settings()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }

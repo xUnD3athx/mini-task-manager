@@ -1,9 +1,10 @@
-package main
+package core
 
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import win "core:sys/windows"
+import "../platform"
 
 // 设置读写、主题/颜色、字体与 GDI 资源生命周期。
 
@@ -26,15 +27,15 @@ color_for_role :: proc(role: int) -> Color {
 
 open_color_picker :: proc(role: int) {
 	current := color_for_role(role)
-	cc: CHOOSECOLORW
-	cc.lStructSize = u32(size_of(CHOOSECOLORW))
+	cc: platform.CHOOSECOLORW
+	cc.lStructSize = u32(size_of(platform.CHOOSECOLORW))
 	cc.hwndOwner = app.hwnd
 	cc.rgbResult = colorref(current)
 	cc.lpCustColors = &color_custom_colors[0]
-	cc.Flags = CC_RGBINIT | CC_FULLOPEN | CC_ANYCOLOR
+	cc.Flags = platform.CC_RGBINIT | platform.CC_FULLOPEN | platform.CC_ANYCOLOR
 
 	app.color_dialog_open = true
-	ok := ChooseColorW(&cc)
+	ok := platform.ChooseColorW(&cc)
 	app.color_dialog_open = false
 
 	if ok {
@@ -66,41 +67,11 @@ settings_set_theme :: proc(index: int) {
 	apply_visual_settings()
 }
 
-settings_set_dock :: proc(mode: Dock_Mode) {
-	if settings.dock == mode {
-		return
-	}
-	settings.dock = mode
-	// Moving an AppBar can hand activation away long enough for the drawer to
-	// close itself; ignore that deactivation while the window is re-anchored.
-	app.deactivate_guard_until = GetTickCount64() + 600
-	save_settings()
-
-	if !app.appbar_registered {
-		register_appbar(app.hwnd)
-	}
-	position_appbar(app.hwnd)
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
-}
-
 settings_toggle_module :: proc(id: Module_Id) {
 	if id == .cores && !settings.modules.cpu {
 		return
 	}
 	module_set(id, !module_enabled(id))
-	save_settings()
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
-}
-
-settings_set_sort :: proc(field: Sort_Field) {
-	if settings.sort_field == field {
-		settings.sort_desc = !settings.sort_desc
-	} else {
-		settings.sort_field = field
-		settings.sort_desc = true
-	}
-	sort_processes(app.processes[:app.process_count])
-	build_task_groups()
 	save_settings()
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
@@ -215,49 +186,6 @@ refresh_history_label :: proc(buf: []u8, ms: int) -> string {
 		return fmt.bprintf(buf, "%dm %ds history", total/60, total%60)
 	}
 	return fmt.bprintf(buf, "%ds history", total)
-}
-
-settings_set_cores_per_page :: proc(per: int) {
-	if per < 0 || per > MAX_CORES {
-		return
-	}
-	settings.cores_per_page = per
-	if per <= 0 {
-		settings.cores_custom_mode = false
-	} else if per == 4 || per == 6 || per == 8 || per == 16 {
-		settings.cores_custom_mode = false
-	} else {
-		settings.cores_custom_mode = true
-		settings.cores_custom = per
-	}
-	app.core_page = 0
-	clamp_core_page()
-	save_settings()
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
-}
-
-settings_use_custom_cores :: proc() {
-	max_per := max(app.cores, 1)
-	settings.cores_custom_mode = true
-	settings.cores_custom = clamp(settings.cores_custom, 1, max_per)
-	settings.cores_per_page = settings.cores_custom
-	app.core_page = 0
-	clamp_core_page()
-	save_settings()
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
-}
-
-settings_adjust_custom_cores :: proc(delta: int) {
-	max_per := max(app.cores, 1)
-	base := clamp(settings.cores_per_page, 1, max_per)
-	per := clamp(base + delta, 1, max_per)
-	settings.cores_custom = per
-	settings.cores_per_page = per
-	settings.cores_custom_mode = true
-	app.core_page = 0
-	clamp_core_page()
-	save_settings()
-	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
 reset_settings :: proc() {
@@ -561,6 +489,17 @@ apply_visual_settings :: proc() {
 	}
 }
 
+destroy_backbuffer :: proc() {
+	if app.mem_dc != nil {
+		_ = win.DeleteDC(app.mem_dc)
+		app.mem_dc = nil
+	}
+	if app.mem_bmp != nil {
+		_ = win.DeleteObject(win.HGDIOBJ(app.mem_bmp))
+		app.mem_bmp = nil
+	}
+}
+
 create_font :: proc(face: win.LPCWSTR, size: i32, weight: i32) -> win.HFONT {
 	return win.CreateFontW(
 		-dip(size), 0, 0, 0, weight,
@@ -575,29 +514,4 @@ delete_gdi :: proc(handle: $T) {
 		return
 	}
 	_ = win.DeleteObject(win.HGDIOBJ(handle))
-}
-
-destroy_resources :: proc() {
-	destroy_icon_cache()
-
-	if app.pdh_query != nil {
-		_ = PdhCloseQuery(app.pdh_query)
-		app.pdh_query = nil
-		app.pdh_read = nil
-		app.pdh_write = nil
-		app.gpu_counter = nil
-		app.gpu_mem_counter = nil
-	}
-
-	delete_gdi(app.fonts.title)
-	delete_gdi(app.fonts.heading)
-	delete_gdi(app.fonts.huge)
-	delete_gdi(app.fonts.med)
-	delete_gdi(app.fonts.stat)
-	delete_gdi(app.fonts.body)
-	delete_gdi(app.fonts.small)
-	delete_gdi(app.fonts.tiny)
-	delete_gdi(app.fonts.badge)
-
-	delete_visual_objects()
 }

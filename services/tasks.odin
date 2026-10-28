@@ -1,6 +1,8 @@
-package main
+package services
 
 import win "core:sys/windows"
+import "../core"
+import "../platform"
 
 // 进程枚举、排序、分组和选中项指标。
 
@@ -11,8 +13,8 @@ lower_wide :: proc(c: u16) -> u16 {
 	return c
 }
 
-same_task_name :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
-	for i in 0..<MAX_NAME_U16 {
+same_task_name :: proc(a, b: [core.MAX_NAME_U16]u16) -> bool {
+	for i in 0..<core.MAX_NAME_U16 {
 		if a[i] != b[i] {
 			return false
 		}
@@ -23,8 +25,8 @@ same_task_name :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
 	return true
 }
 
-task_name_less :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
-	for i in 0..<MAX_NAME_U16 {
+task_name_less :: proc(a, b: [core.MAX_NAME_U16]u16) -> bool {
+	for i in 0..<core.MAX_NAME_U16 {
 		ca := a[i]
 		cb := b[i]
 		if ca == 0 {
@@ -42,36 +44,36 @@ task_name_less :: proc(a, b: [MAX_NAME_U16]u16) -> bool {
 	return false
 }
 
-process_name_less :: proc(a, b: ^Process) -> bool {
+process_name_less :: proc(a, b: ^core.Process) -> bool {
 	return task_name_less(a.name, b.name)
 }
 
-process_order_less :: proc(a, b: ^Process) -> bool {
-	switch settings.sort_field {
+process_order_less :: proc(a, b: ^core.Process) -> bool {
+	switch core.settings.sort_field {
 	case .cpu:
 		if a.cpu_percent != b.cpu_percent {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.cpu_percent > b.cpu_percent
 			}
 			return a.cpu_percent < b.cpu_percent
 		}
 	case .memory:
 		if a.working_set != b.working_set {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.working_set > b.working_set
 			}
 			return a.working_set < b.working_set
 		}
 	case .gpu:
 		if a.gpu_percent != b.gpu_percent {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.gpu_percent > b.gpu_percent
 			}
 			return a.gpu_percent < b.gpu_percent
 		}
 	case .disk:
 		if a.io_bps != b.io_bps {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.io_bps > b.io_bps
 			}
 			return a.io_bps < b.io_bps
@@ -81,7 +83,7 @@ process_order_less :: proc(a, b: ^Process) -> bool {
 	return process_name_less(a, b)
 }
 
-sort_processes :: proc(list: []Process) {
+sort_processes :: proc(list: []core.Process) {
 	for i in 1..<len(list) {
 		p := list[i]
 		j := i - 1
@@ -93,32 +95,32 @@ sort_processes :: proc(list: []Process) {
 	}
 }
 
-group_order_less :: proc(a, b: ^Task_Group) -> bool {
-	switch settings.sort_field {
+group_order_less :: proc(a, b: ^core.Task_Group) -> bool {
+	switch core.settings.sort_field {
 	case .cpu:
 		if a.cpu_percent != b.cpu_percent {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.cpu_percent > b.cpu_percent
 			}
 			return a.cpu_percent < b.cpu_percent
 		}
 	case .memory:
 		if a.working_set != b.working_set {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.working_set > b.working_set
 			}
 			return a.working_set < b.working_set
 		}
 	case .gpu:
 		if a.gpu_percent != b.gpu_percent {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.gpu_percent > b.gpu_percent
 			}
 			return a.gpu_percent < b.gpu_percent
 		}
 	case .disk:
 		if a.io_bps != b.io_bps {
-			if settings.sort_desc {
+			if core.settings.sort_desc {
 				return a.io_bps > b.io_bps
 			}
 			return a.io_bps < b.io_bps
@@ -127,45 +129,45 @@ group_order_less :: proc(a, b: ^Task_Group) -> bool {
 	return task_name_less(a.name, b.name)
 }
 
-group_is_expanded :: proc(name: [MAX_NAME_U16]u16) -> bool {
-	for i in 0..<app.expand_count {
-		if same_task_name(app.expand_state[i].name, name) {
-			return app.expand_state[i].expanded
+group_is_expanded :: proc(name: [core.MAX_NAME_U16]u16) -> bool {
+	for i in 0..<core.app.expand_count {
+		if same_task_name(core.app.expand_state[i].name, name) {
+			return core.app.expand_state[i].expanded
 		}
 	}
 	return false
 }
 
-group_set_expanded :: proc(name: [MAX_NAME_U16]u16, expanded: bool) {
-	for i in 0..<app.expand_count {
-		if same_task_name(app.expand_state[i].name, name) {
-			app.expand_state[i].expanded = expanded
+group_set_expanded :: proc(name: [core.MAX_NAME_U16]u16, expanded: bool) {
+	for i in 0..<core.app.expand_count {
+		if same_task_name(core.app.expand_state[i].name, name) {
+			core.app.expand_state[i].expanded = expanded
 			return
 		}
 	}
-	if app.expand_count < MAX_GROUPS {
-		app.expand_state[app.expand_count] = Expand_State{name = name, expanded = expanded}
-		app.expand_count += 1
+	if core.app.expand_count < core.MAX_GROUPS {
+		core.app.expand_state[core.app.expand_count] = core.Expand_State{name = name, expanded = expanded}
+		core.app.expand_count += 1
 	}
 }
 
-append_task_row :: proc(kind: List_Row_Kind, index: int) {
-	if app.task_row_count < MAX_TASK_ROWS {
-		app.task_rows[app.task_row_count] = List_Row{kind = kind, index = index}
-		app.task_row_count += 1
+append_task_row :: proc(kind: core.List_Row_Kind, index: int) {
+	if core.app.task_row_count < core.MAX_TASK_ROWS {
+		core.app.task_rows[core.app.task_row_count] = core.List_Row{kind = kind, index = index}
+		core.app.task_row_count += 1
 	}
 }
 
 rebuild_task_rows :: proc() {
-	app.task_row_count = 0
-	for gi in 0..<app.group_count {
-		g := &app.groups[gi]
+	core.app.task_row_count = 0
+	for gi in 0..<core.app.group_count {
+		g := &core.app.groups[gi]
 		append_task_row(.group, gi)
 		if !group_is_expanded(g.name) {
 			continue
 		}
-		for pi in 0..<app.process_count {
-			if same_task_name(app.processes[pi].name, g.name) {
+		for pi in 0..<core.app.process_count {
+			if same_task_name(core.app.processes[pi].name, g.name) {
 				append_task_row(.process, pi)
 			}
 		}
@@ -173,26 +175,26 @@ rebuild_task_rows :: proc() {
 }
 
 build_task_groups :: proc() {
-	app.group_count = 0
-	for pi in 0..<app.process_count {
-		p := &app.processes[pi]
+	core.app.group_count = 0
+	for pi in 0..<core.app.process_count {
+		p := &core.app.processes[pi]
 		gi := -1
-		for j in 0..<app.group_count {
-			if same_task_name(app.groups[j].name, p.name) {
+		for j in 0..<core.app.group_count {
+			if same_task_name(core.app.groups[j].name, p.name) {
 				gi = j
 				break
 			}
 		}
 		if gi < 0 {
-			if app.group_count >= MAX_GROUPS {
+			if core.app.group_count >= core.MAX_GROUPS {
 				continue
 			}
-			gi = app.group_count
-			app.groups[gi] = Task_Group{name = p.name}
-			app.group_count += 1
+			gi = core.app.group_count
+			core.app.groups[gi] = core.Task_Group{name = p.name}
+			core.app.group_count += 1
 		}
 
-		g := &app.groups[gi]
+		g := &core.app.groups[gi]
 		g.count += 1
 		g.cpu_percent += p.cpu_percent
 		g.working_set += p.working_set
@@ -200,23 +202,23 @@ build_task_groups :: proc() {
 		g.io_bps += p.io_bps
 	}
 
-	for i in 1..<app.group_count {
-		g := app.groups[i]
+	for i in 1..<core.app.group_count {
+		g := core.app.groups[i]
 		j := i - 1
-		for j >= 0 && group_order_less(&g, &app.groups[j]) {
-			app.groups[j+1] = app.groups[j]
+		for j >= 0 && group_order_less(&g, &core.app.groups[j]) {
+			core.app.groups[j+1] = core.app.groups[j]
 			j -= 1
 		}
-		app.groups[j+1] = g
+		core.app.groups[j+1] = g
 	}
 
 	rebuild_task_rows()
 }
 
-find_old_process :: proc(pid: u32) -> (p: ^Process, found: bool) {
-	for i in 0..<app.process_count {
-		if app.processes[i].pid == pid {
-			return &app.processes[i], true
+find_old_process :: proc(pid: u32) -> (p: ^core.Process, found: bool) {
+	for i in 0..<core.app.process_count {
+		if core.app.processes[i].pid == pid {
+			return &core.app.processes[i], true
 		}
 	}
 	return nil, false
@@ -226,15 +228,15 @@ gpu_usage_add :: proc(pid: u32, usage: f32) {
 	if pid == 0 || usage <= 0 {
 		return
 	}
-	for i in 0..<app.gpu_pid_count {
-		if app.gpu_pid_usage[i].pid == pid {
-			app.gpu_pid_usage[i].usage += usage
+	for i in 0..<core.app.gpu_pid_count {
+		if core.app.gpu_pid_usage[i].pid == pid {
+			core.app.gpu_pid_usage[i].usage += usage
 			return
 		}
 	}
-	if app.gpu_pid_count < GPU_PID_CAPACITY {
-		app.gpu_pid_usage[app.gpu_pid_count] = Gpu_Pid_Usage{pid = pid, usage = usage}
-		app.gpu_pid_count += 1
+	if core.app.gpu_pid_count < core.GPU_PID_CAPACITY {
+		core.app.gpu_pid_usage[core.app.gpu_pid_count] = core.Gpu_Pid_Usage{pid = pid, usage = usage}
+		core.app.gpu_pid_count += 1
 	}
 }
 
@@ -242,9 +244,9 @@ gpu_usage_for_pid :: proc(pid: u32) -> f32 {
 	if pid == 0 {
 		return 0
 	}
-	for i in 0..<app.gpu_pid_count {
-		if app.gpu_pid_usage[i].pid == pid {
-			v := app.gpu_pid_usage[i].usage
+	for i in 0..<core.app.gpu_pid_count {
+		if core.app.gpu_pid_usage[i].pid == pid {
+			v := core.app.gpu_pid_usage[i].usage
 			if v > 100 {
 				return 100
 			}
@@ -254,19 +256,19 @@ gpu_usage_for_pid :: proc(pid: u32) -> f32 {
 	return 0
 }
 
-find_process :: proc(pid: u32) -> (p: ^Process, found: bool) {
-	for i in 0..<app.process_count {
-		if app.processes[i].pid == pid {
-			return &app.processes[i], true
+find_process :: proc(pid: u32) -> (p: ^core.Process, found: bool) {
+	for i in 0..<core.app.process_count {
+		if core.app.processes[i].pid == pid {
+			return &core.app.processes[i], true
 		}
 	}
 	return nil, false
 }
 
 refresh_processes :: proc() {
-	now := GetTickCount64()
-	elapsed_ms := now - app.last_process_ms
-	app.last_process_ms = now
+	now := platform.GetTickCount64()
+	elapsed_ms := now - core.app.last_process_ms
+	core.app.last_process_ms = now
 
 	snap := win.CreateToolhelp32Snapshot(win.TH32CS_SNAPPROCESS, 0)
 	if snap == win.INVALID_HANDLE_VALUE {
@@ -280,17 +282,17 @@ refresh_processes :: proc() {
 	count := 0
 
 	for status := win.Process32FirstW(snap, &entry); status; status = win.Process32NextW(snap, &entry) {
-		if count >= MAX_PROCESSES {
+		if count >= core.MAX_PROCESSES {
 			break
 		}
 
-		p := &next_processes[count]
-		p^ = Process{}
+		p := &core.next_processes[count]
+		p^ = core.Process{}
 		p.pid = entry.th32ProcessID
 		p.threads = entry.cntThreads
 
 		n := 0
-		for n < MAX_NAME_U16-1 {
+		for n < core.MAX_NAME_U16-1 {
 			c := entry.szExeFile[n]
 			if c == 0 {
 				break
@@ -303,39 +305,39 @@ refresh_processes :: proc() {
 		old, has_old := find_old_process(p.pid)
 
 		handle := win.OpenProcess(
-			PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+			platform.PROCESS_QUERY_LIMITED_INFORMATION | platform.PROCESS_VM_READ,
 			win.FALSE,
 			p.pid,
 		)
 		if handle != nil {
-			counters: Process_Memory_Counters
-			counters.cb = u32(size_of(Process_Memory_Counters))
-			if GetProcessMemoryInfo(handle, &counters, counters.cb) {
+			counters: platform.Process_Memory_Counters
+			counters.cb = u32(size_of(platform.Process_Memory_Counters))
+			if platform.GetProcessMemoryInfo(handle, &counters, counters.cb) {
 				p.working_set = u64(counters.working_set_size)
 			}
 
 			creation, exit_time, kernel_time, user_time: win.FILETIME
 			if win.GetProcessTimes(handle, &creation, &exit_time, &kernel_time, &user_time) {
-				p.cpu_time = filetime_value(kernel_time) + filetime_value(user_time)
+				p.cpu_time = core.filetime_value(kernel_time) + core.filetime_value(user_time)
 			}
 
-			io: Io_Counters
-			if GetProcessIoCounters(handle, &io) {
+			io: platform.Io_Counters
+			if platform.GetProcessIoCounters(handle, &io) {
 				p.io_read_total = io.read_bytes
 				p.io_write_total = io.write_bytes
 			}
 
 			handles: u32
-			if GetProcessHandleCount(handle, &handles) {
+			if platform.GetProcessHandleCount(handle, &handles) {
 				p.handles = handles
 			}
 			_ = win.CloseHandle(handle)
 		}
 
 		if has_old && elapsed_ms > 0 {
-			if p.cpu_time > old.cpu_time && app.cores > 0 {
+			if p.cpu_time > old.cpu_time && core.app.cores > 0 {
 				delta := p.cpu_time - old.cpu_time
-				units := f64(elapsed_ms) * 10000.0 * f64(app.cores)
+				units := f64(elapsed_ms) * 10000.0 * f64(core.app.cores)
 				pct := f32(f64(delta) / units * 100.0)
 				if pct < 0 {
 					pct = 0
@@ -359,36 +361,35 @@ refresh_processes :: proc() {
 		count += 1
 	}
 
-	sort_processes(next_processes[:count])
+	sort_processes(core.next_processes[:count])
 
 	for i in 0..<count {
-		app.processes[i] = next_processes[i]
+		core.app.processes[i] = core.next_processes[i]
 	}
-	app.process_count = count
+	core.app.process_count = count
 
-	if app.has_selection {
+	if core.app.has_selection {
 		alive := false
 		for i in 0..<count {
-			if app.group_selected {
-				if same_task_name(app.processes[i].name, app.selected_group) {
+			if core.app.group_selected {
+				if same_task_name(core.app.processes[i].name, core.app.selected_group) {
 					alive = true
 					break
 				}
-			} else if app.processes[i].pid == app.selected_pid {
+			} else if core.app.processes[i].pid == core.app.selected_pid {
 				alive = true
 				break
 			}
 		}
 		if !alive {
-			app.has_selection = false
-			app.group_selected = false
-			app.task = {}
+			core.app.has_selection = false
+			core.app.group_selected = false
+			core.app.task = {}
 			refresh_window_preview()
 		}
 	}
 
 	build_task_groups()
-	clamp_scroll()
 }
 
 push_sample :: proc(samples: []f32, v: f32) {
@@ -402,23 +403,23 @@ push_sample :: proc(samples: []f32, v: f32) {
 }
 
 update_task_metrics :: proc() {
-	if !app.has_selection {
-		if app.task.pid != 0 || app.task.group_mode {
-			app.task = {}
+	if !core.app.has_selection {
+		if core.app.task.pid != 0 || core.app.task.group_mode {
+			core.app.task = {}
 		}
 		return
 	}
 
 	// Start a fresh history when the selection changes.
-	if app.group_selected {
-		if !app.task.group_mode || !same_task_name(app.task.group, app.selected_group) {
-			app.task = Task_Metrics{group_mode = true, group = app.selected_group}
+	if core.app.group_selected {
+		if !core.app.task.group_mode || !same_task_name(core.app.task.group, core.app.selected_group) {
+			core.app.task = core.Task_Metrics{group_mode = true, group = core.app.selected_group}
 		}
-	} else if app.task.group_mode || app.task.pid != app.selected_pid {
-		app.task = Task_Metrics{pid = app.selected_pid}
+	} else if core.app.task.group_mode || core.app.task.pid != core.app.selected_pid {
+		core.app.task = core.Task_Metrics{pid = core.app.selected_pid}
 	}
 
-	t := &app.task
+	t := &core.app.task
 	t.cpu = 0
 	t.mem_bytes = 0
 	t.gpu = 0
@@ -430,8 +431,8 @@ update_task_metrics :: proc() {
 	t.count = 0
 
 	if t.group_mode {
-		for i in 0..<app.process_count {
-			p := &app.processes[i]
+		for i in 0..<core.app.process_count {
+			p := &core.app.processes[i]
 			if !same_task_name(p.name, t.group) {
 				continue
 			}
@@ -467,4 +468,18 @@ update_task_metrics :: proc() {
 	push_sample(t.gpu_samples[:], t.gpu)
 	push_sample(t.read_samples[:], f32(t.read_bps))
 	push_sample(t.write_samples[:], f32(t.write_bps))
+}
+
+// settings_set_sort switches the active sort field and rebuilds the tree.
+settings_set_sort :: proc(field: core.Sort_Field) {
+	if core.settings.sort_field == field {
+		core.settings.sort_desc = !core.settings.sort_desc
+	} else {
+		core.settings.sort_field = field
+		core.settings.sort_desc = true
+	}
+	sort_processes(core.app.processes[:core.app.process_count])
+	build_task_groups()
+	core.save_settings()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }

@@ -1,6 +1,8 @@
-package main
+package services
 
 import win "core:sys/windows"
+import "../core"
+import "../platform"
 
 // Icons are cached by executable name because every row (a process or an
 // application group) is keyed by that name. The list is rebuilt on every
@@ -15,7 +17,7 @@ Icon_State :: enum {
 }
 
 Icon_Cache_Entry :: struct {
-	name:  [MAX_NAME_U16]u16,
+	name:  [core.MAX_NAME_U16]u16,
 	icon:  win.HICON,
 	pid:   u32,
 	state: Icon_State,
@@ -24,7 +26,7 @@ Icon_Cache_Entry :: struct {
 icon_cache: [MAX_ICON_CACHE]Icon_Cache_Entry
 icon_cache_count: int
 
-find_icon_entry :: proc(name: [MAX_NAME_U16]u16) -> (entry: ^Icon_Cache_Entry, found: bool) {
+find_icon_entry :: proc(name: [core.MAX_NAME_U16]u16) -> (entry: ^Icon_Cache_Entry, found: bool) {
 	for i in 0..<icon_cache_count {
 		if same_task_name(icon_cache[i].name, name) {
 			return &icon_cache[i], true
@@ -33,10 +35,10 @@ find_icon_entry :: proc(name: [MAX_NAME_U16]u16) -> (entry: ^Icon_Cache_Entry, f
 	return nil, false
 }
 
-pid_for_task_name :: proc(name: [MAX_NAME_U16]u16) -> (pid: u32, found: bool) {
-	for i in 0..<app.process_count {
-		if same_task_name(app.processes[i].name, name) {
-			return app.processes[i].pid, true
+pid_for_task_name :: proc(name: [core.MAX_NAME_U16]u16) -> (pid: u32, found: bool) {
+	for i in 0..<core.app.process_count {
+		if same_task_name(core.app.processes[i].name, name) {
+			return core.app.processes[i].pid, true
 		}
 	}
 	return 0, false
@@ -53,7 +55,7 @@ load_process_icon :: proc(pid: u32) -> win.HICON {
 
 	path: [EXE_PATH_CHARS]u16
 	size := u32(len(path))
-	if QueryFullProcessImageNameW(handle, 0, raw_data(path[:]), &size) == win.FALSE {
+	if platform.QueryFullProcessImageNameW(handle, 0, raw_data(path[:]), &size) == win.FALSE {
 		return nil
 	}
 	if size >= u32(len(path)) {
@@ -61,13 +63,13 @@ load_process_icon :: proc(pid: u32) -> win.HICON {
 	}
 	path[size] = 0
 
-	info: SHFILEINFOW
-	result := SHGetFileInfoW(
+	info: platform.SHFILEINFOW
+	result := platform.SHGetFileInfoW(
 		win.wstring(raw_data(path[:])),
 		0,
 		&info,
-		u32(size_of(SHFILEINFOW)),
-		SHGFI_ICON | SHGFI_LARGEICON,
+		u32(size_of(platform.SHFILEINFOW)),
+		platform.SHGFI_ICON | platform.SHGFI_LARGEICON,
 	)
 	if result == 0 || info.hIcon == nil {
 		return nil
@@ -77,7 +79,7 @@ load_process_icon :: proc(pid: u32) -> win.HICON {
 
 // Lazily fetch and cache the icon for a task name. Callers fall back to the
 // letter badge when this returns nil (protected processes, missing icons).
-icon_for_task_name :: proc(name: [MAX_NAME_U16]u16) -> win.HICON {
+icon_for_task_name :: proc(name: [core.MAX_NAME_U16]u16) -> win.HICON {
 	pid, has_pid := pid_for_task_name(name)
 
 	entry: ^Icon_Cache_Entry

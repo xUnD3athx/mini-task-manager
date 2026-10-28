@@ -1,4 +1,4 @@
-package main
+package platform
 
 import win "core:sys/windows"
 

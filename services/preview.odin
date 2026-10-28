@@ -1,24 +1,17 @@
-package main
+package services
 
 import "base:runtime"
 import win "core:sys/windows"
+import "../core"
+import "../platform"
 
 // Minimum size a window needs to be worth previewing; splash screens and
 // tooltips aren't useful task previews.
 PREVIEW_MIN_WINDOW_W :: 120
 PREVIEW_MIN_WINDOW_H :: 80
 
-Window_Preview :: struct {
-	hwnd:      win.HWND,
-	thumbnail: win.HANDLE,
-	src_w:     i32,
-	src_h:     i32,
-	title:     [128]u16,
-	visible:   bool,
-}
-
 Main_Window_Find :: struct {
-	pids:      [MAX_PROCESSES]u32,
+	pids:      [core.MAX_PROCESSES]u32,
 	pid_count: int,
 	best:      win.HWND,
 	best_area: i64,
@@ -82,7 +75,7 @@ find_main_window_callback :: proc "system" (hwnd: win.HWND, lparam: win.LPARAM) 
 	}
 	w := rect.right - rect.left
 	h := rect.bottom - rect.top
-	if w < dip(PREVIEW_MIN_WINDOW_W) || h < dip(PREVIEW_MIN_WINDOW_H) {
+	if w < core.dip(PREVIEW_MIN_WINDOW_W) || h < core.dip(PREVIEW_MIN_WINDOW_H) {
 		return win.TRUE
 	}
 
@@ -121,15 +114,15 @@ find_main_window :: proc(pid: u32) -> win.HWND {
 
 // The window shown for an application is the largest one owned by any of its
 // processes, so renderer/helper tasks don't hide the main window.
-find_group_window :: proc(name: [MAX_NAME_U16]u16) -> win.HWND {
-	pids: [MAX_PROCESSES]u32
+find_group_window :: proc(name: [core.MAX_NAME_U16]u16) -> win.HWND {
+	pids: [core.MAX_PROCESSES]u32
 	count := 0
-	for i in 0..<app.process_count {
+	for i in 0..<core.app.process_count {
 		if count >= len(pids) {
 			break
 		}
-		if same_task_name(app.processes[i].name, name) {
-			pids[count] = app.processes[i].pid
+		if same_task_name(core.app.processes[i].name, name) {
+			pids[count] = core.app.processes[i].pid
 			count += 1
 		}
 	}
@@ -137,18 +130,18 @@ find_group_window :: proc(name: [MAX_NAME_U16]u16) -> win.HWND {
 }
 
 refresh_window_preview :: proc() {
-	wanted := app.view == .tasks && app.has_selection
+	wanted := core.app.view == .tasks && core.app.has_selection
 
 	hwnd: win.HWND = nil
 	if wanted {
-		if app.group_selected {
-			hwnd = find_group_window(app.selected_group)
+		if core.app.group_selected {
+			hwnd = find_group_window(core.app.selected_group)
 		} else {
-			hwnd = find_main_window(app.selected_pid)
+			hwnd = find_main_window(core.app.selected_pid)
 		}
 	}
 
-	if hwnd != nil && hwnd == app.preview.hwnd && app.preview.thumbnail != nil {
+	if hwnd != nil && hwnd == core.app.preview.hwnd && core.app.preview.thumbnail != nil {
 		update_preview_source_rect()
 		return
 	}
@@ -157,40 +150,40 @@ refresh_window_preview :: proc() {
 	if hwnd == nil {
 		return
 	}
-	if DwmRegisterThumbnail(app.hwnd, hwnd, &app.preview.thumbnail) != 0 {
-		app.preview.thumbnail = nil
+	if platform.DwmRegisterThumbnail(core.app.hwnd, hwnd, &core.app.preview.thumbnail) != 0 {
+		core.app.preview.thumbnail = nil
 		return
 	}
-	app.preview.hwnd = hwnd
-	app.preview.title = {}
-	_ = win.GetWindowTextW(hwnd, raw_data(app.preview.title[:]), i32(len(app.preview.title)))
+	core.app.preview.hwnd = hwnd
+	core.app.preview.title = {}
+	_ = win.GetWindowTextW(hwnd, raw_data(core.app.preview.title[:]), i32(len(core.app.preview.title)))
 	update_preview_source_rect()
 }
 
 destroy_window_preview :: proc() {
-	if app.preview.thumbnail != nil {
-		_ = DwmUnregisterThumbnail(app.preview.thumbnail)
+	if core.app.preview.thumbnail != nil {
+		_ = platform.DwmUnregisterThumbnail(core.app.preview.thumbnail)
 	}
-	app.preview = {}
+	core.app.preview = {}
 }
 
 update_preview_source_rect :: proc() {
-	if app.preview.hwnd == nil {
+	if core.app.preview.hwnd == nil {
 		return
 	}
 	rect: win.RECT
-	if win.GetWindowRect(app.preview.hwnd, &rect) == win.FALSE {
+	if win.GetWindowRect(core.app.preview.hwnd, &rect) == win.FALSE {
 		return
 	}
-	app.preview.src_w = rect.right - rect.left
-	app.preview.src_h = rect.bottom - rect.top
+	core.app.preview.src_w = rect.right - rect.left
+	core.app.preview.src_h = rect.bottom - rect.top
 }
 
 preview_is_alive :: proc() -> bool {
-	if app.preview.thumbnail == nil || app.preview.hwnd == nil {
+	if core.app.preview.thumbnail == nil || core.app.preview.hwnd == nil {
 		return false
 	}
-	if win.IsWindow(app.preview.hwnd) == win.FALSE {
+	if win.IsWindow(core.app.preview.hwnd) == win.FALSE {
 		destroy_window_preview()
 		return false
 	}
@@ -204,10 +197,10 @@ draw_preview_thumbnail :: proc(bounds: win.RECT) {
 	if !preview_is_alive() {
 		return
 	}
-	if app.preview.src_w <= 0 || app.preview.src_h <= 0 {
+	if core.app.preview.src_w <= 0 || core.app.preview.src_h <= 0 {
 		update_preview_source_rect()
 	}
-	if app.preview.src_w <= 0 || app.preview.src_h <= 0 {
+	if core.app.preview.src_w <= 0 || core.app.preview.src_h <= 0 {
 		return
 	}
 
@@ -217,9 +210,9 @@ draw_preview_thumbnail :: proc(bounds: win.RECT) {
 		return
 	}
 
-	scale := min(f32(w) / f32(app.preview.src_w), f32(h) / f32(app.preview.src_h))
-	dw := i32(f32(app.preview.src_w) * scale)
-	dh := i32(f32(app.preview.src_h) * scale)
+	scale := min(f32(w) / f32(core.app.preview.src_w), f32(h) / f32(core.app.preview.src_h))
+	dw := i32(f32(core.app.preview.src_w) * scale)
+	dh := i32(f32(core.app.preview.src_h) * scale)
 	dest := win.RECT {
 		left   = bounds.left + (w - dw) / 2,
 		top    = bounds.top + (h - dh) / 2,
@@ -227,29 +220,29 @@ draw_preview_thumbnail :: proc(bounds: win.RECT) {
 		bottom = bounds.top + (h - dh) / 2 + dh,
 	}
 
-	props := Dwm_Thumbnail_Properties {
-		dw_flags       = DWM_TNP_RECTDESTINATION | DWM_TNP_VISIBLE | DWM_TNP_OPACITY,
+	props := platform.Dwm_Thumbnail_Properties {
+		dw_flags       = platform.DWM_TNP_RECTDESTINATION | platform.DWM_TNP_VISIBLE | platform.DWM_TNP_OPACITY,
 		rc_destination = dest,
 		opacity        = 255,
 		visible        = win.TRUE,
 	}
-	if DwmUpdateThumbnailProperties(app.preview.thumbnail, &props) == 0 {
-		app.preview.visible = true
+	if platform.DwmUpdateThumbnailProperties(core.app.preview.thumbnail, &props) == 0 {
+		core.app.preview.visible = true
 	}
 }
 
 hide_preview_thumbnail :: proc() {
-	if app.preview.thumbnail == nil {
-		app.preview.visible = false
+	if core.app.preview.thumbnail == nil {
+		core.app.preview.visible = false
 		return
 	}
-	if !app.preview.visible {
+	if !core.app.preview.visible {
 		return
 	}
-	props := Dwm_Thumbnail_Properties {
-		dw_flags = DWM_TNP_VISIBLE,
+	props := platform.Dwm_Thumbnail_Properties {
+		dw_flags = platform.DWM_TNP_VISIBLE,
 		visible  = win.FALSE,
 	}
-	_ = DwmUpdateThumbnailProperties(app.preview.thumbnail, &props)
-	app.preview.visible = false
+	_ = platform.DwmUpdateThumbnailProperties(core.app.preview.thumbnail, &props)
+	core.app.preview.visible = false
 }

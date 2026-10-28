@@ -1,8 +1,11 @@
-package main
+package core
 
 import win "core:sys/windows"
+import "../platform"
 
 // 全局状态、数据类型、设置结构和基础辅助。
+
+TIMER_ID :: 1
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
@@ -404,6 +407,15 @@ Pens :: struct {
 	border, cpu, mem, gpu, null: win.HPEN,
 }
 
+Window_Preview :: struct {
+	hwnd:      win.HWND,
+	thumbnail: win.HANDLE,
+	src_w:     i32,
+	src_h:     i32,
+	title:     [128]u16,
+	visible:   bool,
+}
+
 App :: struct {
 	hwnd:  win.HWND,
 	scale: f32,
@@ -459,7 +471,7 @@ App :: struct {
 	cores:       int,
 
 	core_usage:     [MAX_CORES]f32,
-	core_prev:      [MAX_CORES]Core_Times,
+	core_prev:      [MAX_CORES]platform.Core_Times,
 	have_core_prev: bool,
 
 	gpu:            f32,
@@ -488,7 +500,7 @@ App :: struct {
 	net_have_prev:  bool,
 	net_ok:         bool,
 	net_online:     bool,
-	net_table:      Mib_If_Table,
+	net_table:      platform.Mib_If_Table,
 
 	cpu_samples: [SAMPLE_COUNT]f32,
 	mem_samples: [SAMPLE_COUNT]f32,

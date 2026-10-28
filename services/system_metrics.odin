@@ -1,59 +1,61 @@
-package main
+package services
 
 import "core:fmt"
 import win "core:sys/windows"
+import "../core"
+import "../platform"
 
 // 系统级指标采集：CPU、每核、内存、GPU、磁盘、网络。
 
 get_core_count :: proc() {
 	info: win.SYSTEM_INFO
 	win.GetSystemInfo(&info)
-	app.cores = min(int(info.dwNumberOfProcessors), MAX_CORES)
-	if app.cores < 1 {
-		app.cores = 1
+	core.app.cores = min(int(info.dwNumberOfProcessors), core.MAX_CORES)
+	if core.app.cores < 1 {
+		core.app.cores = 1
 	}
 }
 
 push_cpu_sample :: proc(v: f32) {
-	for i in 1..<SAMPLE_COUNT {
-		app.cpu_samples[i-1] = app.cpu_samples[i]
+	for i in 1..<core.SAMPLE_COUNT {
+		core.app.cpu_samples[i-1] = core.app.cpu_samples[i]
 	}
-	app.cpu_samples[SAMPLE_COUNT-1] = v
+	core.app.cpu_samples[core.SAMPLE_COUNT-1] = v
 }
 
 push_mem_sample :: proc(v: f32) {
-	for i in 1..<SAMPLE_COUNT {
-		app.mem_samples[i-1] = app.mem_samples[i]
+	for i in 1..<core.SAMPLE_COUNT {
+		core.app.mem_samples[i-1] = core.app.mem_samples[i]
 	}
-	app.mem_samples[SAMPLE_COUNT-1] = v
+	core.app.mem_samples[core.SAMPLE_COUNT-1] = v
 }
 
 push_gpu_sample :: proc(v: f32) {
-	for i in 1..<SAMPLE_COUNT {
-		app.gpu_samples[i-1] = app.gpu_samples[i]
+	for i in 1..<core.SAMPLE_COUNT {
+		core.app.gpu_samples[i-1] = core.app.gpu_samples[i]
 	}
-	app.gpu_samples[SAMPLE_COUNT-1] = v
+	core.app.gpu_samples[core.SAMPLE_COUNT-1] = v
 }
 
 update_core_usage :: proc() {
-	if app.cores <= 0 {
+	if core.app.cores <= 0 {
 		return
 	}
 
-	times: [MAX_CORES]Core_Times
-	status := NtQuerySystemInformation(
-		SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION,
+	times: [core.MAX_CORES]platform.Core_Times
+	status := platform.NtQuerySystemInformation(
+		platform.SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION,
 		rawptr(&times[0]),
-		u32(app.cores * size_of(Core_Times)),
+		u32(core.app.cores * size_of(platform.Core_Times)),
 		nil,
 	)
 	if status != 0 {
 		return
 	}
 
-	if app.have_core_prev {
-		for i in 0..<app.cores {
-			prev := app.core_prev[i]
+	if core.app.have_core_prev {
+		for i in 0..<core.app.cores {
+			prev := core.app.core_prev[i]
 			cur := times[i]
 			delta_idle := cur.idle - prev.idle
 			delta_total := (cur.kernel + cur.user) - (prev.kernel + prev.user)
@@ -69,16 +71,16 @@ update_core_usage :: proc() {
 				if pct > 100 {
 					pct = 100
 				}
-				app.core_usage[i] = pct
+				core.app.core_usage[i] = pct
 			}
 		}
 	}
 
-	for i in 0..<app.cores {
-		app.core_prev[i] = times[i]
-		push_sample(app.core_samples[i][:], app.core_usage[i])
+	for i in 0..<core.app.cores {
+		core.app.core_prev[i] = times[i]
+		push_sample(core.app.core_samples[i][:], core.app.core_usage[i])
 	}
-	app.have_core_prev = true
+	core.app.have_core_prev = true
 }
 
 wide_has_ascii :: proc(text: [^]u16, needle: string) -> bool {
@@ -153,46 +155,46 @@ gpu_engine_group :: proc(name: [^]u16) -> int {
 }
 
 update_pdh_rates :: proc() {
-	app.task.gpu = 0
-	app.gpu_pid_count = 0
-	if app.pdh_query == nil {
-		app.disk_read_bps = 0
-		app.disk_write_bps = 0
+	core.app.task.gpu = 0
+	core.app.gpu_pid_count = 0
+	if core.app.pdh_query == nil {
+		core.app.disk_read_bps = 0
+		core.app.disk_write_bps = 0
 		return
 	}
-	if PdhCollectQueryData(app.pdh_query) != 0 {
-		app.disk_read_bps = 0
-		app.disk_write_bps = 0
+	if platform.PdhCollectQueryData(core.app.pdh_query) != 0 {
+		core.app.disk_read_bps = 0
+		core.app.disk_write_bps = 0
 		return
 	}
 
-	if app.pdh_read != nil {
-		value: Pdh_Fmt_Counter_Value
-		if PdhGetFormattedCounterValue(app.pdh_read, PDH_FMT_DOUBLE, nil, &value) == 0 && value.status <= 1 {
-			app.disk_read_bps = max(value.double_value, 0.0)
+	if core.app.pdh_read != nil {
+		value: platform.Pdh_Fmt_Counter_Value
+		if platform.PdhGetFormattedCounterValue(core.app.pdh_read, platform.PDH_FMT_DOUBLE, nil, &value) == 0 && value.status <= 1 {
+			core.app.disk_read_bps = max(value.double_value, 0.0)
 		}
 
 		value = {}
-		if PdhGetFormattedCounterValue(app.pdh_write, PDH_FMT_DOUBLE, nil, &value) == 0 && value.status <= 1 {
-			app.disk_write_bps = max(value.double_value, 0.0)
+		if platform.PdhGetFormattedCounterValue(core.app.pdh_write, platform.PDH_FMT_DOUBLE, nil, &value) == 0 && value.status <= 1 {
+			core.app.disk_write_bps = max(value.double_value, 0.0)
 		}
 	}
 
-	if app.gpu_counter != nil {
-		buffer_size := u32(size_of(app.pdh_buffer))
+	if core.app.gpu_counter != nil {
+		buffer_size := u32(size_of(core.app.pdh_buffer))
 		item_count: u32
-		status := PdhGetFormattedCounterArrayW(
-			app.gpu_counter,
-			PDH_FMT_DOUBLE,
+		status := platform.PdhGetFormattedCounterArrayW(
+			core.app.gpu_counter,
+			platform.PDH_FMT_DOUBLE,
 			&buffer_size,
 			&item_count,
-			rawptr(&app.pdh_buffer[0]),
+			rawptr(&core.app.pdh_buffer[0]),
 		)
 		if status == 0 {
-			sums: [GPU_ENGINE_COUNT]f64
-			ptr := uintptr(&app.pdh_buffer[0])
+			sums: [core.GPU_ENGINE_COUNT]f64
+			ptr := uintptr(&core.app.pdh_buffer[0])
 			for _ in 0..<item_count {
-				item := cast(^Pdh_Fmt_Counter_Value_Item)ptr
+				item := cast(^platform.Pdh_Fmt_Counter_Value_Item)ptr
 				if item.value.status <= 1 {
 					v := item.value.double_value
 					if v > 0 {
@@ -201,11 +203,11 @@ update_pdh_rates :: proc() {
 						gpu_usage_add(gpu_engine_pid(cast([^]u16)item.name), f32(v))
 					}
 				}
-				ptr += uintptr(size_of(Pdh_Fmt_Counter_Value_Item))
+				ptr += uintptr(size_of(platform.Pdh_Fmt_Counter_Value_Item))
 			}
 
 			overall: f64 = 0
-			for i in 0..<GPU_ENGINE_COUNT {
+			for i in 0..<core.GPU_ENGINE_COUNT {
 				v := sums[i]
 				if v > 100 {
 					v = 100
@@ -214,63 +216,63 @@ update_pdh_rates :: proc() {
 					overall = v
 				}
 			}
-			app.gpu = f32(overall)
-			app.gpu_ok = true
+			core.app.gpu = f32(overall)
+			core.app.gpu_ok = true
 		}
 	}
 
-	if app.gpu_mem_counter != nil {
-		buffer_size := u32(size_of(app.pdh_buffer))
+	if core.app.gpu_mem_counter != nil {
+		buffer_size := u32(size_of(core.app.pdh_buffer))
 		item_count: u32
-		status := PdhGetFormattedCounterArrayW(
-			app.gpu_mem_counter,
-			PDH_FMT_DOUBLE,
+		status := platform.PdhGetFormattedCounterArrayW(
+			core.app.gpu_mem_counter,
+			platform.PDH_FMT_DOUBLE,
 			&buffer_size,
 			&item_count,
-			rawptr(&app.pdh_buffer[0]),
+			rawptr(&core.app.pdh_buffer[0]),
 		)
 		if status == 0 {
 			max_bytes: f64 = 0
-			ptr := uintptr(&app.pdh_buffer[0])
+			ptr := uintptr(&core.app.pdh_buffer[0])
 			for _ in 0..<item_count {
-				item := cast(^Pdh_Fmt_Counter_Value_Item)ptr
+				item := cast(^platform.Pdh_Fmt_Counter_Value_Item)ptr
 				if item.value.status <= 1 && item.value.double_value > max_bytes {
 					max_bytes = item.value.double_value
 				}
-				ptr += uintptr(size_of(Pdh_Fmt_Counter_Value_Item))
+				ptr += uintptr(size_of(platform.Pdh_Fmt_Counter_Value_Item))
 			}
-			app.gpu_vram = f32(max_bytes / GIB)
-			app.gpu_mem_ok = true
+			core.app.gpu_vram = f32(max_bytes / core.GIB)
+			core.app.gpu_mem_ok = true
 		}
 	}
 }
 
 update_network_rates :: proc(now: u64) {
-	size := u32(size_of(app.net_table))
-	status := GetIfTable(rawptr(&app.net_table), &size, win.FALSE)
+	size := u32(size_of(core.app.net_table))
+	status := platform.GetIfTable(rawptr(&core.app.net_table), &size, win.FALSE)
 	if status != 0 {
-		app.net_ok = false
-		app.net_online = false
-		app.net_in_bps = 0
-		app.net_out_bps = 0
-		app.net_have_prev = false
-		app.net_prev_count = 0
+		core.app.net_ok = false
+		core.app.net_online = false
+		core.app.net_in_bps = 0
+		core.app.net_out_bps = 0
+		core.app.net_have_prev = false
+		core.app.net_prev_count = 0
 		return
 	}
-	app.net_ok = true
+	core.app.net_ok = true
 
-	next_prev: [MAX_NET_INTERFACES]If_Counter
+	next_prev: [core.MAX_NET_INTERFACES]core.If_Counter
 	next_count := 0
 	max_in: f64 = 0
 	max_out: f64 = 0
 	online := false
-	has_prev := app.net_have_prev && now > app.net_last_ms
-	seconds := f64(now - app.net_last_ms) / 1000.0
+	has_prev := core.app.net_have_prev && now > core.app.net_last_ms
+	seconds := f64(now - core.app.net_last_ms) / 1000.0
 
-	count := min(int(app.net_table.count), len(app.net_table.rows))
+	count := min(int(core.app.net_table.count), len(core.app.net_table.rows))
 	for i in 0..<count {
-		row := &app.net_table.rows[i]
-		if row.type_ != IF_TYPE_ETHERNET_CSMACD && row.type_ != IF_TYPE_IEEE80211 {
+		row := &core.app.net_table.rows[i]
+		if row.type_ != platform.IF_TYPE_ETHERNET_CSMACD && row.type_ != platform.IF_TYPE_IEEE80211 {
 			continue
 		}
 		// Adapters without media (WAN Miniports, unplugged NICs) still show up as
@@ -281,26 +283,26 @@ update_network_rates :: proc(now: u64) {
 		// Only adapters that are enabled and actually attached to a network can
 		// move traffic. Disconnected adapters keep their last counters around,
 		// so including them keeps reporting stale rates while offline.
-		if row.admin_status != IF_ADMIN_STATUS_UP {
+		if row.admin_status != platform.IF_ADMIN_STATUS_UP {
 			continue
 		}
-		if row.oper_status != IF_OPER_STATUS_CONNECTED && row.oper_status != IF_OPER_STATUS_OPERATIONAL {
+		if row.oper_status != platform.IF_OPER_STATUS_CONNECTED && row.oper_status != platform.IF_OPER_STATUS_OPERATIONAL {
 			continue
 		}
 		descr_len := min(int(row.descr_len), len(row.descr))
-		if is_virtual_adapter(row.descr[:descr_len]) {
+		if core.is_virtual_adapter(row.descr[:descr_len]) {
 			continue
 		}
 		online = true
 
 		if has_prev && seconds > 0 {
-			for j in 0..<app.net_prev_count {
-				prev := app.net_prev_if[j]
+			for j in 0..<core.app.net_prev_count {
+				prev := core.app.net_prev_if[j]
 				if prev.index != row.index {
 					continue
 				}
-				delta_in := wrapped_delta_u32(row.in_octets, prev.bytes_in)
-				delta_out := wrapped_delta_u32(row.out_octets, prev.bytes_out)
+				delta_in := core.wrapped_delta_u32(row.in_octets, prev.bytes_in)
+				delta_out := core.wrapped_delta_u32(row.out_octets, prev.bytes_out)
 				limit := f64(row.speed) / 8.0 * seconds * 2.0 + 1_000_000.0
 				if f64(delta_in) <= limit && f64(delta_out) <= limit {
 					in_rate := f64(delta_in) / seconds
@@ -316,43 +318,43 @@ update_network_rates :: proc(now: u64) {
 			}
 		}
 
-		if next_count < MAX_NET_INTERFACES {
-			next_prev[next_count] = If_Counter{index = row.index, bytes_in = row.in_octets, bytes_out = row.out_octets}
+		if next_count < core.MAX_NET_INTERFACES {
+			next_prev[next_count] = core.If_Counter{index = row.index, bytes_in = row.in_octets, bytes_out = row.out_octets}
 			next_count += 1
 		}
 	}
 
 	for i in 0..<next_count {
-		app.net_prev_if[i] = next_prev[i]
+		core.app.net_prev_if[i] = next_prev[i]
 	}
-	app.net_prev_count = next_count
+	core.app.net_prev_count = next_count
 
-	app.net_online = online
+	core.app.net_online = online
 	if !online {
-		app.net_in_bps = 0
-		app.net_out_bps = 0
+		core.app.net_in_bps = 0
+		core.app.net_out_bps = 0
 	} else if has_prev && seconds > 0 {
-		app.net_in_bps = max(max_in, 0)
-		app.net_out_bps = max(max_out, 0)
+		core.app.net_in_bps = max(max_in, 0)
+		core.app.net_out_bps = max(max_out, 0)
 	}
 
-	app.net_last_ms = now
-	app.net_have_prev = true
+	core.app.net_last_ms = now
+	core.app.net_have_prev = true
 }
 
 update_metrics :: proc() {
-	now := GetTickCount64()
+	now := platform.GetTickCount64()
 
 	idle, kernel, user: win.FILETIME
-	GetSystemTimes(&idle, &kernel, &user)
+	platform.GetSystemTimes(&idle, &kernel, &user)
 
-	idle_now := filetime_value(idle)
-	kernel_now := filetime_value(kernel)
-	user_now := filetime_value(user)
+	idle_now := core.filetime_value(idle)
+	kernel_now := core.filetime_value(kernel)
+	user_now := core.filetime_value(user)
 
-	if app.have_last {
-		delta_idle := idle_now - app.last_idle
-		delta_total := (kernel_now - app.last_kernel) + (user_now - app.last_user)
+	if core.app.have_last {
+		delta_idle := idle_now - core.app.last_idle
+		delta_total := (kernel_now - core.app.last_kernel) + (user_now - core.app.last_user)
 		if delta_total > 0 {
 			busy := delta_total > delta_idle ? delta_total - delta_idle : 0
 			pct := f32(busy) / f32(delta_total) * 100.0
@@ -362,15 +364,15 @@ update_metrics :: proc() {
 			if pct > 100 {
 				pct = 100
 			}
-			app.cpu = pct
+			core.app.cpu = pct
 		}
 	}
 
-	app.last_idle = idle_now
-	app.last_kernel = kernel_now
-	app.last_user = user_now
-	app.have_last = true
-	push_cpu_sample(app.cpu)
+	core.app.last_idle = idle_now
+	core.app.last_kernel = kernel_now
+	core.app.last_user = user_now
+	core.app.have_last = true
+	push_cpu_sample(core.app.cpu)
 
 	update_core_usage()
 
@@ -381,25 +383,25 @@ update_metrics :: proc() {
 		avail := f32(mem.ullAvailPhys)
 		if total > 0 {
 			used := total - avail
-			app.mem_total = total / f32(GIB)
-			app.mem_used = used / f32(GIB)
-			app.mem_percent = used / total * 100.0
+			core.app.mem_total = total / f32(core.GIB)
+			core.app.mem_used = used / f32(core.GIB)
+			core.app.mem_percent = used / total * 100.0
 		}
 	}
 
-	push_mem_sample(app.mem_percent)
+	push_mem_sample(core.app.mem_percent)
 
 	update_pdh_rates()
-	push_gpu_sample(app.gpu)
+	push_gpu_sample(core.app.gpu)
 
 	update_network_rates(now)
 	update_task_metrics()
 
-	app.uptime_secs = now / 1000
+	core.app.uptime_secs = now / 1000
 }
 
 format_uptime :: proc(buf: []u8) -> string {
-	secs := app.uptime_secs
+	secs := core.app.uptime_secs
 	days := secs / 86400
 	hours := (secs % 86400) / 3600
 	mins := (secs % 3600) / 60
@@ -453,7 +455,7 @@ rate_scale :: proc(bps: f64) -> (factor: f64, suffix: string) {
 
 init_pdh_counters :: proc() {
 	query: rawptr
-	if PdhOpenQueryW(nil, 0, &query) != 0 {
+	if platform.PdhOpenQueryW(nil, 0, &query) != 0 {
 		return
 	}
 
@@ -463,38 +465,38 @@ init_pdh_counters :: proc() {
 	write_path := win.utf8_to_wstring_alloc("\\PhysicalDisk(_Total)\\Disk Write Bytes/sec")
 
 	read_counter, write_counter: rawptr
-	read_ok := PdhAddEnglishCounterW(query, read_path, 0, &read_counter) == 0
-	write_ok := PdhAddEnglishCounterW(query, write_path, 0, &write_counter) == 0
+	read_ok := platform.PdhAddEnglishCounterW(query, read_path, 0, &read_counter) == 0
+	write_ok := platform.PdhAddEnglishCounterW(query, write_path, 0, &write_counter) == 0
 	if read_ok && write_ok {
-		app.pdh_read = read_counter
-		app.pdh_write = write_counter
-		app.pdh_ok = true
+		core.app.pdh_read = read_counter
+		core.app.pdh_write = write_counter
+		core.app.pdh_ok = true
 		any_counter = true
 	}
 
 	gpu_path := win.utf8_to_wstring_alloc("\\GPU Engine(*)\\Utilization Percentage")
 	gpu_counter: rawptr
-	if PdhAddEnglishCounterW(query, gpu_path, 0, &gpu_counter) == 0 {
-		app.gpu_counter = gpu_counter
+	if platform.PdhAddEnglishCounterW(query, gpu_path, 0, &gpu_counter) == 0 {
+		core.app.gpu_counter = gpu_counter
 		any_counter = true
 	}
 
 	gpu_mem_path := win.utf8_to_wstring_alloc("\\GPU Adapter Memory(*)\\Dedicated Usage")
 	gpu_mem_counter: rawptr
-	if PdhAddEnglishCounterW(query, gpu_mem_path, 0, &gpu_mem_counter) == 0 {
-		app.gpu_mem_counter = gpu_mem_counter
+	if platform.PdhAddEnglishCounterW(query, gpu_mem_path, 0, &gpu_mem_counter) == 0 {
+		core.app.gpu_mem_counter = gpu_mem_counter
 		any_counter = true
 	}
 
 	if !any_counter {
-		_ = PdhCloseQuery(query)
+		_ = platform.PdhCloseQuery(query)
 		return
 	}
 
-	if PdhCollectQueryData(query) != 0 {
-		_ = PdhCloseQuery(query)
+	if platform.PdhCollectQueryData(query) != 0 {
+		_ = platform.PdhCloseQuery(query)
 		return
 	}
 
-	app.pdh_query = query
+	core.app.pdh_query = query
 }
