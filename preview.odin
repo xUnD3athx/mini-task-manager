@@ -82,7 +82,7 @@ find_main_window_callback :: proc "system" (hwnd: win.HWND, lparam: win.LPARAM) 
 	}
 	w := rect.right - rect.left
 	h := rect.bottom - rect.top
-	if w < S(PREVIEW_MIN_WINDOW_W) || h < S(PREVIEW_MIN_WINDOW_H) {
+	if w < dip(PREVIEW_MIN_WINDOW_W) || h < dip(PREVIEW_MIN_WINDOW_H) {
 		return win.TRUE
 	}
 
