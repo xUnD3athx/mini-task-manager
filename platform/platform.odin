@@ -3,7 +3,6 @@ package platform
 import win "core:sys/windows"
 
 foreign import user32 "system:User32.lib"
-foreign import gdi32 "system:Gdi32.lib"
 foreign import kernel32 "system:Kernel32.lib"
 foreign import ntdll "system:ntdll.lib"
 foreign import psapi "system:Psapi.lib"
@@ -61,11 +60,6 @@ foreign user32 {
 		flicker_free_brush: win.HBRUSH,
 		flags: u32,
 	) -> win.BOOL ---
-}
-
-@(default_calling_convention="system")
-foreign gdi32 {
-	SetViewportOrgEx :: proc(hdc: win.HDC, x, y: i32, previous: ^win.POINT) -> win.BOOL ---
 }
 
 @(default_calling_convention="system")

@@ -21,21 +21,46 @@ paint :: proc(dc: win.HDC) {
 		gdiplus_end()
 	}
 
-	// The bar is drawn in its own local space and shifted to the bottom edge
-	// when the window is pinned there. GDI+ is started after the viewport shift
-	// so anti-aliased shapes and GDI text/icons share the same origin.
+	// GDI+ drawing resets the target DC's viewport, so a bottom-docked bar is
+	// rendered into its own surface and blitted into place instead of shifting
+	// the shared DC.
 	if core.settings.dock == .bottom {
-		previous: win.POINT
-		_ = platform.SetViewportOrgEx(dc, 0, bar_top(), &previous)
-		gdiplus_begin(dc)
-		draw_bar(dc)
-		gdiplus_end()
-		_ = platform.SetViewportOrgEx(dc, previous.x, previous.y, nil)
+		draw_bar_shifted(dc, bar_top())
 	} else {
 		gdiplus_begin(dc)
 		draw_bar(dc)
 		gdiplus_end()
 	}
+}
+
+draw_bar_shifted :: proc(dc: win.HDC, y: i32) {
+	if y <= 0 {
+		gdiplus_begin(dc)
+		draw_bar(dc)
+		gdiplus_end()
+		return
+	}
+
+	bar_dc := win.CreateCompatibleDC(dc)
+	if bar_dc == nil {
+		return
+	}
+	bar_bmp := win.CreateCompatibleBitmap(dc, core.app.width, core.app.bar_h)
+	if bar_bmp == nil {
+		_ = win.DeleteDC(bar_dc)
+		return
+	}
+
+	previous := win.SelectObject(bar_dc, win.HGDIOBJ(bar_bmp))
+	_ = win.SetBkMode(bar_dc, win.BKMODE.TRANSPARENT)
+	gdiplus_begin(bar_dc)
+	draw_bar(bar_dc)
+	gdiplus_end()
+	_ = win.BitBlt(dc, 0, y, core.app.width, core.app.bar_h, bar_dc, 0, 0, win.SRCCOPY)
+
+	_ = win.SelectObject(bar_dc, previous)
+	_ = win.DeleteObject(win.HGDIOBJ(bar_bmp))
+	_ = win.DeleteDC(bar_dc)
 }
 
 // Anti-aliased shapes go through one GDI+ Graphics per painting pass; text and
