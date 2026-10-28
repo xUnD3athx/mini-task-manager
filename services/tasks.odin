@@ -192,16 +192,80 @@ rebuild_task_rows :: proc() {
 	core.app.task_row_count = 0
 	for gi in 0..<core.app.group_count {
 		g := &core.app.groups[gi]
+		visible := 0
+		worst := core.Risk_Tier.unknown
+		reason := core.Risk_Reason.no_signal
+		for pi in 0..<core.app.process_count {
+			p := &core.app.processes[pi]
+			if !same_task_name(p.name, g.name) || !core.risk_tier_visible(p.risk) {
+				continue
+			}
+			visible += 1
+			if p.risk > worst {
+				worst = p.risk
+				reason = p.risk_reason
+			}
+		}
+
+		// Filtering applies to the members, not the aggregate: an application
+		// stays in the list while at least one of its processes is shown, and
+		// its dot reflects the strongest tier that survived.
+		g.visible_count = visible
+		g.visible_risk = worst
+		g.visible_risk_reason = reason
+		if visible == 0 {
+			continue
+		}
+
 		append_task_row(.group, gi)
 		if !group_is_expanded(g.name) {
 			continue
 		}
 		for pi in 0..<core.app.process_count {
-			if same_task_name(core.app.processes[pi].name, g.name) {
+			p := &core.app.processes[pi]
+			if same_task_name(p.name, g.name) && core.risk_tier_visible(p.risk) {
 				append_task_row(.process, pi)
 			}
 		}
 	}
+}
+
+visible_process_count :: proc() -> int {
+	count := 0
+	for i in 0..<core.app.process_count {
+		if core.risk_tier_visible(core.app.processes[i].risk) {
+			count += 1
+		}
+	}
+	return count
+}
+
+// A filtered-out task must not keep the detail pane alive with no row selected.
+clear_hidden_selection :: proc() {
+	if !core.app.has_selection {
+		return
+	}
+
+	visible := false
+	if core.app.group_selected {
+		for i in 0..<core.app.group_count {
+			g := &core.app.groups[i]
+			if same_task_name(g.name, core.app.selected_group) {
+				visible = g.visible_count > 0
+				break
+			}
+		}
+	} else if p, found := find_process(core.app.selected_pid); found {
+		visible = core.risk_tier_visible(p.risk)
+	}
+
+	if visible {
+		return
+	}
+	core.app.has_selection = false
+	core.app.group_selected = false
+	core.app.task = {}
+	refresh_window_preview()
 }
 
 build_task_groups :: proc() {

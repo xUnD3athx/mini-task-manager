@@ -464,3 +464,22 @@ task_sort_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {
 	y := panel.top + core.dip(core.TASK_SORT_ROW_DIP)
 	return win.RECT{x, y, x + w, y + core.dip(core.TASK_SORT_CHIP_H_DIP)}
 }
+
+// Compact risk toggles under the sort chips: a "RISK" label and one small chip
+// per tier. The chips share the remaining width.
+task_risk_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {
+	count := len(core.RISK_TIERS)
+	gap := core.dip(4)
+	left := panel.left + core.dip(20) + core.dip(34)
+	right := panel.right - core.dip(20)
+	w := (right - left - gap*i32(count-1)) / i32(count)
+	if w < core.dip(1) {
+		w = core.dip(1)
+	}
+	if w > core.dip(96) {
+		w = core.dip(96)
+	}
+	x := left + i32(index)*(w + gap)
+	y := panel.top + core.dip(core.TASK_RISK_ROW_DIP)
+	return win.RECT{x, y, x + w, y + core.dip(core.TASK_RISK_CHIP_H_DIP)}
+}

@@ -93,8 +93,12 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 
 	count_buf: [32]u8
 	count_text := fmt.bprintf(count_buf[:], "%d", core.app.process_count)
-	draw_text(dc, count_text, geo.panel.right - core.dip(20) - core.dip(70), geo.panel.top + core.dip(16),
-		core.dip(70), core.dip(20), core.app.fonts.small, core.COL_MUTED, platform.DT_RIGHT | platform.DT_VCENTER | platform.DT_SINGLELINE)
+	visible_count := services.visible_process_count()
+	if core.risk_filter_active() && visible_count < core.app.process_count {
+		count_text = fmt.bprintf(count_buf[:], "%d of %d", visible_count, core.app.process_count)
+	}
+	draw_text(dc, count_text, geo.panel.right - core.dip(20) - core.dip(104), geo.panel.top + core.dip(16),
+		core.dip(104), core.dip(20), core.app.fonts.small, core.COL_MUTED, platform.DT_RIGHT | platform.DT_VCENTER | platform.DT_SINGLELINE)
 
 	labels := core.SORT_FIELD_LABELS
 	for i in 0..<len(labels) {
@@ -118,14 +122,44 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 			core.app.fonts.tiny, color, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
 
-	divider := win.RECT{geo.panel.left + core.dip(18), geo.panel.top + core.dip(72),
-		geo.panel.right - core.dip(18), geo.panel.top + core.dip(73)}
+	divider := win.RECT{geo.panel.left + core.dip(18), geo.panel.top + core.dip(96),
+		geo.panel.right - core.dip(18), geo.panel.top + core.dip(97)}
 	_ = win.FillRect(dc, &divider, core.app.brushes.line)
+
+	risk_y := geo.panel.top + core.dip(core.TASK_RISK_ROW_DIP)
+	draw_text(dc, "RISK", geo.panel.left + core.dip(20), risk_y,
+		core.dip(34), core.dip(core.TASK_RISK_CHIP_H_DIP), core.app.fonts.tiny, core.COL_MUTED,
+		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE)
+	for i in 0..<len(core.RISK_TIERS) {
+		chip := task_risk_chip_rect(geo.panel, i)
+		tier := core.RISK_TIERS[i]
+		visible := core.risk_tier_visible(tier)
+
+		brush := core.app.brushes.badge
+		text_color := core.COL_MUTED
+		if visible {
+			brush = risk_brush(tier)
+			text_color = core.COL_BADGE_TEXT
+		}
+		fill_round(dc, chip, brush, core.app.pens.border, core.dip(6))
+		draw_text(dc, core.risk_label(tier), chip.left, chip.top,
+			chip.right - chip.left, chip.bottom - chip.top, core.app.fonts.tiny, text_color,
+			platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
+	}
 
 	if core.app.process_count == 0 {
 		draw_text(dc, "No processes", geo.panel.left, geo.list_top,
 			geo.panel.right - geo.panel.left, core.dip(40),
 			core.app.fonts.small, core.COL_MUTED, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
+		return
+	}
+	if core.app.task_row_count == 0 {
+		draw_text(dc, "No tasks match the risk filter", geo.panel.left + core.dip(20), geo.list_top + core.dip(16),
+			geo.panel.right - geo.panel.left - core.dip(40), core.dip(20),
+			core.app.fonts.small, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
+		draw_text(dc, "Change the risk filter above.", geo.panel.left + core.dip(20), geo.list_top + core.dip(38),
+			geo.panel.right - geo.panel.left - core.dip(40), core.dip(20),
+			core.app.fonts.tiny, core.COL_MUTED, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 		return
 	}
 
@@ -304,7 +338,7 @@ draw_group_row :: proc(dc: win.HDC, g: ^core.Task_Group, left, right, y, row_h: 
 		return
 	}
 
-	indent := draw_risk_dot(dc, g.risk, tx, y + core.dip(13))
+	indent := draw_risk_dot(dc, g.visible_risk, tx, y + core.dip(13))
 	tx += indent
 	tw -= indent
 
@@ -324,10 +358,14 @@ draw_group_row :: proc(dc: win.HDC, g: ^core.Task_Group, left, right, y, row_h: 
 		core.app.fonts.stat, core.COL_TEXT,
 		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS | platform.DT_NOPREFIX)
 
-	sub_buf: [32]u8
-	sub := fmt.bprintf(sub_buf[:], "%d processes", g.count)
-	if g.count == 1 {
+	sub_buf: [48]u8
+	sub := ""
+	if g.visible_count > 0 && g.visible_count < g.count {
+		sub = fmt.bprintf(sub_buf[:], "%d of %d processes", g.visible_count, g.count)
+	} else if g.count == 1 {
 		sub = "1 process"
+	} else {
+		sub = fmt.bprintf(sub_buf[:], "%d processes", g.count)
 	}
 	metric_w := core.dip(100)
 	left_w := tw - metric_w

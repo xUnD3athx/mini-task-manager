@@ -13,8 +13,12 @@ import "../services"
 selected_risk :: proc() -> (tier: core.Risk_Tier, reason: core.Risk_Reason) {
 	if core.app.group_selected {
 		for i in 0..<core.app.group_count {
-			if services.same_task_name(core.app.groups[i].name, core.app.selected_group) {
-				return core.app.groups[i].risk, core.app.groups[i].risk_reason
+			g := &core.app.groups[i]
+			if services.same_task_name(g.name, core.app.selected_group) {
+				if g.visible_count > 0 {
+					return g.visible_risk, g.visible_risk_reason
+				}
+				return g.risk, g.risk_reason
 			}
 		}
 		return .unknown, .no_signal

@@ -53,7 +53,22 @@ handle_tasks_click :: proc(x, y: i32) {
 	}
 
 	geo := ui.tasks_geometry()
-	if geo.visible <= 0 || geo.panel.right <= geo.panel.left {
+	if geo.panel.right <= geo.panel.left {
+		return
+	}
+
+	for i in 0..<len(core.RISK_TIERS) {
+		if core.point_in_rect(x, y, ui.task_risk_chip_rect(geo.panel, i)) {
+			core.settings_toggle_risk_tier(core.RISK_TIERS[i])
+			services.rebuild_task_rows()
+			services.clear_hidden_selection()
+			ui.clamp_scroll()
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+			return
+		}
+	}
+
+	if geo.visible <= 0 {
 		return
 	}
 
@@ -117,6 +132,9 @@ handle_settings_click :: proc(x, y: i32) {
 
 	if core.point_in_rect(x, y, layout.reset) {
 		core.reset_settings()
+		services.sort_processes(core.app.processes[:core.app.process_count])
+		services.build_task_groups()
+		ui.clamp_scroll()
 		return
 	}
 

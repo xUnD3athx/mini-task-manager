@@ -76,6 +76,16 @@ settings_toggle_module :: proc(id: Module_Id) {
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
 }
 
+// Keeps at least one tier visible so the task list never goes blank by accident.
+settings_toggle_risk_tier :: proc(tier: Risk_Tier) {
+	if settings.risk_show[int(tier)] && risk_tiers_visible_count() <= 1 {
+		return
+	}
+	settings.risk_show[int(tier)] = !settings.risk_show[int(tier)]
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 apply_refresh_timer :: proc() {
 	if app.hwnd != nil {
 		_ = win.SetTimer(app.hwnd, TIMER_ID, u32(settings.refresh_ms), nil)
@@ -316,6 +326,14 @@ parse_settings :: proc(text: string) {
 			settings.refresh_custom_mode = parse_bool(value)
 		case "dock":
 			settings.dock = Dock_Mode(clamp(parse_int(value), 0, len(DOCK_LABELS)-1))
+		case "risk_show_unknown":
+			settings.risk_show[int(Risk_Tier.unknown)] = parse_bool(value)
+		case "risk_show_safe":
+			settings.risk_show[int(Risk_Tier.safe)] = parse_bool(value)
+		case "risk_show_risky":
+			settings.risk_show[int(Risk_Tier.risky)] = parse_bool(value)
+		case "risk_show_blocked":
+			settings.risk_show[int(Risk_Tier.blocked)] = parse_bool(value)
 		}
 	}
 
@@ -341,6 +359,16 @@ parse_settings :: proc(text: string) {
 	if version < 2 {
 		settings.sort_field = .cpu
 		settings.sort_desc = true
+	}
+	// A hand-edited file hiding every tier would leave an empty list; restore
+	// the default (safe only) instead.
+	if risk_tiers_visible_count() == 0 {
+		settings.risk_show = RISK_SHOW_DEFAULT
+	}
+	// Version 4 moved the filter to the task panel and defaults to safe only.
+	// Files from the earlier settings-page filter start from that default once.
+	if version < 4 {
+		settings.risk_show = RISK_SHOW_DEFAULT
 	}
 }
 
@@ -380,9 +408,10 @@ save_settings :: proc() {
 	buf: [1024]u8
 	content := fmt.bprintf(
 		buf[:],
-		"version=3\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
+		"version=4\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
 		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\nrefresh_ms=%d\n" +
-		"refresh_custom=%d\nrefresh_custom_mode=%d\ndock=%d\n",
+		"refresh_custom=%d\nrefresh_custom_mode=%d\ndock=%d\n" +
+		"risk_show_unknown=%d\nrisk_show_safe=%d\nrisk_show_risky=%d\nrisk_show_blocked=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -403,6 +432,10 @@ save_settings :: proc() {
 		settings.refresh_custom,
 		int(settings.refresh_custom_mode),
 		int(settings.dock),
+		int(settings.risk_show[int(Risk_Tier.unknown)]),
+		int(settings.risk_show[int(Risk_Tier.safe)]),
+		int(settings.risk_show[int(Risk_Tier.risky)]),
+		int(settings.risk_show[int(Risk_Tier.blocked)]),
 	)
 	_ = os.write_entire_file(path, content)
 }

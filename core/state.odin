@@ -26,11 +26,13 @@ BAR_RIGHT_RESERVE_DIP   :: 158
 BAR_SECTION_GAP_DIP     :: 16
 DRAWER_HEIGHT_DIP       :: 540
 TASK_PANEL_PADDING_DIP  :: 18
-TASK_PANEL_HEADER_DIP   :: 82
+TASK_PANEL_HEADER_DIP   :: 106
 TASK_ROW_HEIGHT_DIP     :: 52
 TASK_SORT_ROW_DIP       :: 44
 TASK_SORT_CHIP_H_DIP    :: 22
 TASK_SORT_CHIP_GAP_DIP  :: 6
+TASK_RISK_ROW_DIP       :: 70
+TASK_RISK_CHIP_H_DIP    :: 20
 
 Color :: [3]u8
 
@@ -146,6 +148,8 @@ Settings :: struct {
 	refresh_custom:    int,
 	refresh_custom_mode: bool,
 	dock:              Dock_Mode,
+	// Indexed by Risk_Tier; a tier set to false is hidden from the task list.
+	risk_show:         [4]bool,
 }
 
 Sort_Field :: enum {
@@ -241,7 +245,31 @@ default_settings :: proc() -> Settings {
 		refresh_ms = 1000,
 		refresh_custom = 750,
 		dock = .top,
+		risk_show = RISK_SHOW_DEFAULT,
 	}
+}
+
+RISK_TIERS := [4]Risk_Tier{.unknown, .safe, .risky, .blocked}
+
+// The list starts focused on the tasks Windows considers normal user apps.
+RISK_SHOW_DEFAULT :: [4]bool{false, true, false, false}
+
+risk_tier_visible :: proc(tier: Risk_Tier) -> bool {
+	return settings.risk_show[int(tier)]
+}
+
+risk_tiers_visible_count :: proc() -> int {
+	count := 0
+	for ok in settings.risk_show {
+		if ok {
+			count += 1
+		}
+	}
+	return count
+}
+
+risk_filter_active :: proc() -> bool {
+	return risk_tiers_visible_count() < len(settings.risk_show)
 }
 
 Module_Id :: enum {
@@ -400,6 +428,11 @@ Task_Group :: struct {
 	io_bps:      f64,
 	risk:        Risk_Tier,
 	risk_reason: Risk_Reason,
+	// The subset of members that passes the risk filter. The row is hidden when
+	// this is zero and its dot reflects the strongest tier still shown.
+	visible_count:       int,
+	visible_risk:        Risk_Tier,
+	visible_risk_reason: Risk_Reason,
 }
 
 List_Row_Kind :: enum {
