@@ -37,6 +37,8 @@ main :: proc() {
 	}
 	core.app.scale = f32(dpi) / 96.0
 	core.app.bar_h = core.dip(core.BAR_HEIGHT_DIP)
+	core.app.standalone_w = core.dip(core.STANDALONE_WIDTH_DIP)
+	core.app.standalone_h = core.dip(core.STANDALONE_HEIGHT_DIP)
 	update_screen_metrics()
 
 	core.load_settings()
@@ -82,12 +84,16 @@ hinstance := win.HINSTANCE(win.GetModuleHandleW(nil))
 	services.update_metrics()
 
 	ex_style := win.WS_EX_TOOLWINDOW | win.WS_EX_TOPMOST
+	start_w := core.app.screen_w
+	if core.settings.dock == .standalone {
+		start_w = core.app.standalone_w
+	}
 	hwnd := win.CreateWindowExW(
 		ex_style,
 		class_name,
 		window_title,
 		win.WS_POPUP,
-		0, 0, core.app.screen_w, core.app.bar_h,
+		0, 0, start_w, core.app.bar_h,
 		nil, nil, hinstance, nil,
 	)
 	if hwnd == nil {
@@ -148,6 +154,15 @@ window_proc :: proc "system" (
 			update_standalone_rect(hwnd)
 		}
 		return 0
+
+	case win.WM_GETMINMAXINFO:
+		if core.settings.dock == .standalone {
+			apply_standalone_limits(cast(^win.MINMAXINFO)(uintptr(lparam)))
+			return 0
+		}
+
+	case win.WM_NCHITTEST:
+		return standalone_hit_test(hwnd, lparam)
 
 	case win.WM_PAINT:
 		paint_window(hwnd)
@@ -295,8 +310,12 @@ drawer_room :: proc() -> i32 {
 	return core.app.screen_h - core.app.bar_rect.top
 }
 
-// Full height of the open drawer, clamped to the room the appbar leaves.
+// Full height of the open drawer: the appbar adds the drawer to the bar, a
+// standalone window is already the drawer.
 drawer_open_height :: proc() -> i32 {
+	if core.settings.dock == .standalone {
+		return core.app.standalone_h
+	}
 	height := core.app.bar_h + core.app.drawer_h
 	room := drawer_room()
 	if height > room {
@@ -323,6 +342,8 @@ set_window_height :: proc(height: i32) {
 	)
 }
 
+// A mode switch can change the open height, so the layout is refitted to the
+// new window rect instead of holding a stale frame.
 apply_window_rect :: proc() {
 	if core.app.hwnd == nil {
 		return
@@ -333,6 +354,10 @@ apply_window_rect :: proc() {
 		height = drawer_open_height()
 	}
 	set_window_height(height)
+	if !core.app.anim.active {
+		core.app.layout_h = height
+		resize_backbuffer()
+	}
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 
@@ -366,14 +391,25 @@ position_appbar :: proc(hwnd: win.HWND) {
 	apply_window_rect()
 }
 
-// Leaves the appbar and remembers the last standalone position. The bar is
-// kept on screen vertically; the width still spans the display for now.
+// Leaves the appbar and restores the last standalone position and size. The
+// width spans the window, not the display, so the bar reflows on its own.
 enter_standalone :: proc(hwnd: win.HWND) {
 	remove_appbar(hwnd)
 	x := i32(0)
-	y := clamp(core.app.standalone_pos.y, 0, core.app.screen_h - core.app.bar_h)
+	w := clamp(core.app.standalone_w, core.dip(core.STANDALONE_MIN_WIDTH_DIP), core.app.screen_w)
+	h := clamp(core.app.standalone_h, core.dip(core.STANDALONE_MIN_HEIGHT_DIP), core.app.screen_h)
+	// An open drawer has to fit on screen, so the bar moves up instead of the
+	// remembered height being cut down.
+	room := core.app.bar_h
+	if core.app.view != .none {
+		room = h
+	}
+	y := clamp(core.app.standalone_pos.y, 0, max(core.app.screen_h - room, 0))
 	core.app.standalone_pos = win.POINT{x = x, y = y}
-	core.app.bar_rect = win.RECT{x, y, x + core.app.screen_w, y + core.app.bar_h}
+	core.app.standalone_w = w
+	core.app.standalone_h = h
+	core.app.drawer_h = h - core.app.bar_h
+	core.app.bar_rect = win.RECT{x, y, x + w, y + core.app.bar_h}
 	apply_window_rect()
 }
 
@@ -387,15 +423,91 @@ update_standalone_rect :: proc(hwnd: win.HWND) {
 	core.app.standalone_pos = win.POINT{x = rect.left, y = rect.top}
 }
 
+// The closed window is only the bar, so its height is locked; an open one may
+// shrink until the drawer gets too cramped.
+apply_standalone_limits :: proc(mmi: ^win.MINMAXINFO) {
+	min_w := core.dip(core.STANDALONE_MIN_WIDTH_DIP)
+	if core.app.view == .none {
+		mmi.ptMinTrackSize = win.POINT{x = min_w, y = core.app.bar_h}
+		mmi.ptMaxTrackSize = win.POINT{x = core.app.screen_w, y = core.app.bar_h}
+		return
+	}
+	mmi.ptMinTrackSize = win.POINT{x = min_w, y = core.dip(core.STANDALONE_MIN_HEIGHT_DIP)}
+	mmi.ptMaxTrackSize = win.POINT{x = core.app.screen_w, y = core.app.screen_h}
+}
+
+// Borderless windows have no resize frame, so the edges are offered here.
+// The top edge stays with the bar, which drags the window.
+standalone_hit_test :: proc(hwnd: win.HWND, lparam: win.LPARAM) -> win.LRESULT {
+	if core.settings.dock != .standalone || core.app.anim.active {
+		return win.HTCLIENT
+	}
+
+	// Non-client hit tests arrive in screen coordinates.
+	pt := win.POINT {
+		x = i32(i16(u16(lparam & 0xffff))),
+		y = i32(i16(u16((lparam >> 16) & 0xffff))),
+	}
+	_ = win.ScreenToClient(hwnd, &pt)
+	rect: win.RECT
+	_ = win.GetClientRect(hwnd, &rect)
+
+	border := core.dip(5)
+	left := pt.x < border
+	right := pt.x >= rect.right - border
+	bottom := pt.y >= rect.bottom - border
+	switch {
+	case bottom && left:
+		return win.HTBOTTOMLEFT
+	case bottom && right:
+		return win.HTBOTTOMRIGHT
+	case bottom:
+		return win.HTBOTTOM
+	case left:
+		return win.HTLEFT
+	case right:
+		return win.HTRIGHT
+	}
+	return win.HTCLIENT
+}
+
 open_view :: proc(view: core.Drawer_View) {
 	if core.app.view != view {
 		core.app.view = view
 		core.app.refresh_edit = false
+		core.app.settings_scroll = 0
 		core.app.layout_h = drawer_open_height()
 		resize_backbuffer()
 	}
+	if core.settings.dock == .standalone {
+		lift_standalone_open()
+	}
 	start_drawer_anim(true)
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+// A bar dragged near the bottom of the screen would open the drawer past the
+// edge, so the window moves up until the whole drawer fits.
+lift_standalone_open :: proc() {
+	if core.app.hwnd == nil {
+		return
+	}
+	height := drawer_open_height()
+	max_y := max(core.app.screen_h - height, 0)
+	if core.app.bar_rect.top <= max_y {
+		return
+	}
+	core.app.bar_rect.top = max_y
+	core.app.standalone_pos.y = max_y
+	_ = win.SetWindowPos(
+		core.app.hwnd,
+		win.HWND_TOPMOST,
+		core.app.bar_rect.left,
+		max_y,
+		core.app.bar_rect.right - core.app.bar_rect.left,
+		core.app.height,
+		win.SWP_NOACTIVATE,
+	)
 }
 
 close_view :: proc() {
@@ -503,13 +615,31 @@ update_client_size :: proc(hwnd: win.HWND) {
 	if core.app.layout_h <= 0 {
 		core.app.layout_h = core.app.height
 	}
+	adopt_standalone_size(hwnd)
 	ui.clamp_scroll()
+	ui.clamp_settings_scroll()
 	// While the drawer animates, the window is shorter than the layout; the
 	// backbuffer already has the full size.
 	if core.app.layout_h == core.app.height && !core.app.anim.active {
 		resize_backbuffer()
 	}
 	_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+}
+
+// A standalone window owns its size: resizing it while the drawer is open is
+// how the drawer gets a new height, and the bar keeps the new width.
+adopt_standalone_size :: proc(hwnd: win.HWND) {
+	if core.settings.dock != .standalone {
+		return
+	}
+	update_standalone_rect(hwnd)
+	core.app.standalone_w = core.app.width
+	if core.app.anim.active || core.app.view == .none {
+		return
+	}
+	core.app.standalone_h = core.app.height
+	core.app.drawer_h = max(core.app.height - core.app.bar_h, 0)
+	core.app.layout_h = core.app.height
 }
 
 paint_window :: proc(hwnd: win.HWND) {

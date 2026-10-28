@@ -10,6 +10,7 @@ foreign import pdh "system:Pdh.lib"
 foreign import iphlpapi "system:iphlpapi.lib"
 foreign import comdlg32 "system:Comdlg32.lib"
 foreign import shell32 "system:Shell32.lib"
+foreign import gdi32 "system:Gdi32.lib"
 
 CC_RGBINIT   :: 0x00000001
 CC_FULLOPEN  :: 0x00000002
@@ -181,6 +182,13 @@ foreign pdh {
 	PdhCloseQuery :: proc(query: rawptr) -> i32 ---
 }
 
+// GDI draws text and plain rectangles, so a scrolling page needs the device
+// context clipped as well as the GDI+ graphics.
+@(default_calling_convention="system")
+foreign gdi32 {
+	IntersectClipRect :: proc(hdc: win.HDC, left, top, right, bottom: win.INT) -> win.INT ---
+}
+
 IF_TYPE_ETHERNET_CSMACD :: 6
 IF_TYPE_IEEE80211       :: 71
 MAX_NET_ROWS            :: 150
@@ -291,6 +299,7 @@ PIXEL_OFFSET_MODE_HALF    :: 4
 GDIP_FILL_MODE_WINDING    :: 1
 GDIP_UNIT_PIXEL           :: 2
 GDIP_LINE_JOIN_ROUND      :: 2
+GDIP_COMBINE_REPLACE      :: 0
 
 Gp_Point_F :: struct {
 	x: f32,
@@ -317,6 +326,12 @@ foreign gdiplus {
 	GdipDeleteGraphics :: proc(graphics: rawptr) -> i32 ---
 	GdipSetSmoothingMode :: proc(graphics: rawptr, mode: i32) -> i32 ---
 	GdipSetPixelOffsetMode :: proc(graphics: rawptr, mode: i32) -> i32 ---
+	GdipSetClipRect :: proc(
+		graphics: rawptr,
+		x, y, width, height: f32,
+		combine_mode: i32,
+	) -> i32 ---
+	GdipResetClip :: proc(graphics: rawptr) -> i32 ---
 
 	GdipCreateSolidFill :: proc(color: u32, brush: ^rawptr) -> i32 ---
 	GdipDeleteBrush :: proc(brush: rawptr) -> i32 ---

@@ -155,6 +155,12 @@ handle_settings_click :: proc(x, y: i32) {
 		return
 	}
 
+	// The page scrolls under the header; only the body holds controls.
+	if x < layout.body.left || x >= layout.body.right ||
+	   y < layout.body.top || y >= layout.body.bottom {
+		return
+	}
+
 	for i in 0..<7 {
 		if core.point_in_rect(x, y, ui.settings_module_row(layout, i)) {
 			id := core.Module_Id(i)
@@ -274,19 +280,44 @@ handle_refresh_edit_char :: proc(ch: int) {
 }
 
 handle_wheel :: proc(wparam: win.WPARAM) {
-	if core.app.anim.active || core.app.view != .tasks {
+	if core.app.anim.active || core.app.view == .none {
 		return
 	}
 
 	pts: win.POINT
 	_ = win.GetCursorPos(&pts)
 	_ = win.ScreenToClient(core.app.hwnd, &pts)
-	geo := ui.tasks_geometry()
-	if pts.x < geo.panel.left || pts.x >= geo.panel.right ||
-	   pts.y < geo.list_top || pts.y >= geo.list_bottom {
+
+	steps := wheel_steps(wparam)
+	if steps == 0 {
 		return
 	}
 
+	switch core.app.view {
+	case .tasks:
+		geo := ui.tasks_geometry()
+		if pts.x < geo.panel.left || pts.x >= geo.panel.right ||
+		   pts.y < geo.list_top || pts.y >= geo.list_bottom {
+			return
+		}
+		core.app.scroll -= int(steps) * 3
+		ui.clamp_scroll()
+	case .settings:
+		layout := ui.settings_layout()
+		if layout.scroll_max <= 0 ||
+		   pts.x < layout.body.left || pts.x >= layout.body.right ||
+		   pts.y < layout.body.top || pts.y >= layout.body.bottom {
+			return
+		}
+		core.app.settings_scroll -= steps * core.dip(core.SETTINGS_SCROLL_STEP_DIP)
+		ui.clamp_settings_scroll()
+	case .none:
+		return
+	}
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+wheel_steps :: proc(wparam: win.WPARAM) -> i32 {
 	bits := u16((u64(wparam) >> 16) & 0xffff)
 	delta := i32(i16(bits))
 	steps := delta / 120
@@ -296,10 +327,7 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 			steps = -1
 		}
 	}
-
-	core.app.scroll -= int(steps) * 3
-	ui.clamp_scroll()
-	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+	return steps
 }
 
 settings_set_dock :: proc(mode: core.Dock_Mode) {
@@ -311,6 +339,9 @@ settings_set_dock :: proc(mode: core.Dock_Mode) {
 	core.save_settings()
 
 	if mode == .top {
+		// The appbar drawer has its own height; the standalone one left the
+		// shared value sized to the floating window.
+		update_screen_metrics()
 		if !core.app.appbar_registered {
 			register_appbar(core.app.hwnd)
 		}

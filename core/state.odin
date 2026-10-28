@@ -29,6 +29,17 @@ TASKS_BUTTON_W_DIP      :: 160
 BAR_RIGHT_RESERVE_DIP   :: 158
 BAR_SECTION_GAP_DIP     :: 16
 DRAWER_HEIGHT_DIP       :: 540
+// A standalone window starts at 800x600 with the drawer open; a closed one
+// is just the bar.
+STANDALONE_WIDTH_DIP      :: 800
+STANDALONE_HEIGHT_DIP     :: 600
+STANDALONE_MIN_WIDTH_DIP  :: 600
+STANDALONE_MIN_HEIGHT_DIP :: 420
+// Settings keeps three columns while they fit; below that the groups stack
+// and the page scrolls.
+SETTINGS_WIDE_MIN_DIP    :: 980
+SETTINGS_TWO_COL_MIN_DIP :: 660
+SETTINGS_SCROLL_STEP_DIP :: 48
 TASK_PANEL_PADDING_DIP  :: 18
 TASK_PANEL_HEADER_DIP   :: 106
 TASK_ROW_HEIGHT_DIP     :: 52
@@ -596,8 +607,12 @@ App :: struct {
 	bar_rect:           win.RECT,
 	appbar_registered:  bool,
 	appbar_moving:      bool,
-	// Screen position of the standalone window, kept while switching modes.
+	// Screen position and size of the standalone window, kept while switching
+	// modes. The open drawer is the whole window; a closed one is just the bar.
 	standalone_pos:     win.POINT,
+	standalone_w:       i32,
+	standalone_h:       i32,
+	settings_scroll:    i32,
 
 	width, height: i32,
 	// Full height the drawer is laid out at. It stays at the open height while

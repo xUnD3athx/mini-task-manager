@@ -285,42 +285,135 @@ clamp_scroll :: proc() {
 	}
 }
 
-Settings_Layout :: struct {
-	outer, reset, modules, colors, appearance: win.RECT,
-	body_top, body_bottom: i32,
+Settings_Mode :: enum {
+	// Three columns, the layout the page was designed for.
+	wide,
+	// Modules on the left, colors and appearance stacked on the right.
+	two,
+	// Everything stacked.
+	one,
 }
 
-settings_layout :: proc() -> Settings_Layout {
+Settings_Layout :: struct {
+	mode: Settings_Mode,
+	outer, reset, modules, colors, appearance: win.RECT,
+	// Visible part of the page; the groups are clipped to it.
+	body: win.RECT,
+	body_top, body_bottom: i32,
+	content_h:  i32,
+	scroll:     i32,
+	scroll_max: i32,
+}
+
+// Column heights in unscrolled page coordinates. They mirror the offsets the
+// rect helpers below use.
+settings_group_heights :: proc() -> (modules_h, colors_h, appearance_h: i32) {
+	modules_h = core.dip(42) + 7*core.dip(36) + core.dip(14) + core.dip(18) +
+		core.dip(26) + core.dip(14) + core.dip(24)
+	colors_h = core.dip(42) + 2*core.dip(70) + core.dip(68) + core.dip(18) +
+		core.dip(26) + core.dip(10) + core.dip(14)
+	appearance_h = core.dip(42) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
+		core.dip(14) + core.dip(18) + core.dip(26) + core.dip(6) + core.dip(24)
+	return
+}
+
+// Places the groups for the current width. Narrow windows stack them instead
+// of squeezing three columns into each other.
+settings_metrics :: proc() -> Settings_Layout {
+	layout := Settings_Layout{}
+	if core.app.width <= 0 || core.app.layout_h <= 0 {
+		return layout
+	}
+
 	outer := win.RECT{core.dip(18), drawer_top() + core.dip(18), core.app.width - core.dip(18), drawer_bottom() - core.dip(18)}
-	reset := win.RECT{outer.right - core.dip(24) - core.dip(138), outer.top + core.dip(16), outer.right - core.dip(24), outer.top + core.dip(46)}
+	layout.outer = outer
+	layout.reset = win.RECT{outer.right - core.dip(24) - core.dip(138), outer.top + core.dip(16), outer.right - core.dip(24), outer.top + core.dip(46)}
 
 	inner_left := outer.left + core.dip(24)
 	inner_right := outer.right - core.dip(24)
 	body_top := outer.top + core.dip(86)
-	body_bottom := outer.bottom - core.dip(24)
+	// The footer sits in the card padding, so the scrolling body stops above it.
+	body_bottom := outer.bottom - core.dip(40)
+	if inner_right <= inner_left || body_bottom <= body_top {
+		return layout
+	}
+	layout.body = win.RECT{inner_left, body_top, inner_right, body_bottom}
+	layout.body_top = body_top
+	layout.body_bottom = body_bottom
+
 	gap := core.dip(24)
 	total := inner_right - inner_left
+	modules_h, colors_h, appearance_h := settings_group_heights()
 
-	modules_w := total * 31 / 100
-	colors_w := total * 40 / 100
-	appearance_w := total - modules_w - colors_w - gap*2
-	if appearance_w < core.dip(150) {
-		appearance_w = core.dip(150)
+	switch {
+	case total >= core.dip(core.SETTINGS_WIDE_MIN_DIP):
+		layout.mode = .wide
+		modules_w := max(total*31/100, core.dip(260))
+		appearance_w := max(total*29/100, core.dip(300))
+		colors_w := total - modules_w - appearance_w - gap*2
+		// Swatches and the custom button need a fixed width; the shortfall is
+		// taken from the two flexible columns, modules first.
+		if colors_w < core.dip(374) {
+			short := core.dip(374) - colors_w
+			take := min(short, max(modules_w - core.dip(260), 0))
+			modules_w -= take
+			short -= take
+			appearance_w -= short
+			colors_w = total - modules_w - appearance_w - gap*2
+		}
+		layout.modules = win.RECT{inner_left, body_top, inner_left + modules_w, body_top + modules_h}
+		layout.colors = win.RECT{layout.modules.right + gap, body_top, layout.modules.right + gap + colors_w, body_top + colors_h}
+		layout.appearance = win.RECT{layout.colors.right + gap, body_top, layout.colors.right + gap + appearance_w, body_top + appearance_h}
+		layout.content_h = max(modules_h, max(colors_h, appearance_h))
+
+	case total >= core.dip(core.SETTINGS_TWO_COL_MIN_DIP):
+		layout.mode = .two
+		modules_w := clamp(total*44/100, core.dip(260), total - gap - core.dip(374))
+		layout.modules = win.RECT{inner_left, body_top, inner_left + modules_w, body_top + modules_h}
+		layout.colors = win.RECT{layout.modules.right + gap, body_top, inner_right, body_top + colors_h}
+		// Appearance goes under the colors, so the two columns stay balanced
+		// instead of leaving a gap under the shorter one.
+		below := layout.colors.bottom + gap
+		layout.appearance = win.RECT{layout.colors.left, below, inner_right, below + appearance_h}
+		layout.content_h = max(layout.modules.bottom, layout.appearance.bottom) - body_top
+
+	case:
+		layout.mode = .one
+		layout.modules = win.RECT{inner_left, body_top, inner_right, body_top + modules_h}
+		below := layout.modules.bottom + gap
+		layout.colors = win.RECT{inner_left, below, inner_right, below + colors_h}
+		below = layout.colors.bottom + gap
+		layout.appearance = win.RECT{inner_left, below, inner_right, below + appearance_h}
+		layout.content_h = layout.appearance.bottom - body_top
 	}
+	return layout
+}
 
-	modules := win.RECT{inner_left, body_top, inner_left + modules_w, body_bottom}
-	colors := win.RECT{modules.right + gap, body_top, modules.right + gap + colors_w, body_bottom}
-	appearance := win.RECT{colors.right + gap, body_top, colors.right + gap + appearance_w, body_bottom}
-
-	return Settings_Layout{
-		outer = outer,
-		reset = reset,
-		modules = modules,
-		colors = colors,
-		appearance = appearance,
-		body_top = body_top,
-		body_bottom = body_bottom,
+// The page itself: the metrics, shifted by how far it has been scrolled.
+settings_layout :: proc() -> Settings_Layout {
+	layout := settings_metrics()
+	body_h := layout.body_bottom - layout.body_top
+	if body_h <= 0 {
+		return layout
 	}
+	layout.scroll_max = max(layout.content_h - body_h, 0)
+	layout.scroll = clamp(core.app.settings_scroll, 0, layout.scroll_max)
+	if layout.scroll == 0 {
+		return layout
+	}
+	dy := -layout.scroll
+	layout.modules = shift_rect(layout.modules, 0, dy)
+	layout.colors = shift_rect(layout.colors, 0, dy)
+	layout.appearance = shift_rect(layout.appearance, 0, dy)
+	return layout
+}
+
+clamp_settings_scroll :: proc() {
+	core.app.settings_scroll = settings_layout().scroll
+}
+
+shift_rect :: proc(rect: win.RECT, dx, dy: i32) -> win.RECT {
+	return win.RECT{rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy}
 }
 
 settings_module_row :: proc(layout: Settings_Layout, index: int) -> win.RECT {

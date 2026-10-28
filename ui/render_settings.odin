@@ -25,6 +25,16 @@ draw_settings_view :: proc(dc: win.HDC) {
 		layout.outer.right - core.dip(24), layout.outer.top + core.dip(71)}
 	_ = win.FillRect(dc, &divider, core.app.brushes.line)
 
+	// The groups scroll under the header when the window is small, so both GDI
+	// text and GDI+ shapes are clipped to the body.
+	saved := win.SaveDC(dc)
+	_ = platform.IntersectClipRect(dc, layout.body.left, layout.body.top, layout.body.right, layout.body.bottom)
+	if gfx != nil {
+		_ = platform.GdipSetClipRect(gfx, f32(layout.body.left), f32(layout.body.top),
+			f32(layout.body.right - layout.body.left), f32(layout.body.bottom - layout.body.top),
+			platform.GDIP_COMBINE_REPLACE)
+	}
+
 	draw_text(dc, "MODULES", layout.modules.left, layout.modules.top, layout.modules.right - layout.modules.left, core.dip(16),
 		core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)
 	draw_text(dc, "COLORS", layout.colors.left, layout.colors.top, layout.colors.right - layout.colors.left, core.dip(16),
@@ -32,10 +42,18 @@ draw_settings_view :: proc(dc: win.HDC) {
 	draw_text(dc, "APPEARANCE", layout.appearance.left, layout.appearance.top, layout.appearance.right - layout.appearance.left, core.dip(16),
 		core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)
 
-	sep1 := win.RECT{layout.modules.right + core.dip(12), layout.body_top, layout.modules.right + core.dip(13), layout.body_bottom}
-	sep2 := win.RECT{layout.colors.right + core.dip(12), layout.body_top, layout.colors.right + core.dip(13), layout.body_bottom}
-	_ = win.FillRect(dc, &sep1, core.app.brushes.line)
-	_ = win.FillRect(dc, &sep2, core.app.brushes.line)
+	// Column rules follow the columns: the whole body whenever two or three
+	// columns are side by side.
+	if layout.mode != .one && layout.body_bottom > layout.body_top {
+		sep := win.RECT{layout.modules.right + core.dip(12), layout.body_top,
+			layout.modules.right + core.dip(13), layout.body_bottom}
+		_ = win.FillRect(dc, &sep, core.app.brushes.line)
+	}
+	if layout.mode == .wide {
+		sep := win.RECT{layout.colors.right + core.dip(12), layout.body_top,
+			layout.colors.right + core.dip(13), layout.body_bottom}
+		_ = win.FillRect(dc, &sep, core.app.brushes.line)
+	}
 
 	for i in 0..<7 {
 		id := core.Module_Id(i)
@@ -258,8 +276,40 @@ draw_settings_view :: proc(dc: win.HDC) {
 			core.app.fonts.small, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
 
+	if gfx != nil {
+		_ = platform.GdipResetClip(gfx)
+	}
+	_ = win.RestoreDC(dc, saved)
+
+	// The footer sits in the card's padding, below the clipped body.
 	draw_text(dc, "Changes are saved automatically", layout.outer.right - core.dip(244), layout.outer.bottom - core.dip(30),
 		core.dip(220), core.dip(14), core.app.fonts.tiny, core.COL_MUTED, platform.DT_RIGHT | platform.DT_SINGLELINE)
+
+	draw_settings_scrollbar(dc, layout)
+}
+
+// Thin rail on the card edge while the page is taller than the window.
+draw_settings_scrollbar :: proc(dc: win.HDC, layout: Settings_Layout) {
+	if layout.scroll_max <= 0 || layout.body_bottom <= layout.body_top {
+		return
+	}
+	x := layout.outer.right - core.dip(10)
+	top := layout.body_top
+	bottom := layout.body_bottom
+	track_h := bottom - top
+
+	track := win.RECT{x, top, x + core.dip(3), bottom}
+	_ = win.FillRect(dc, &track, core.app.brushes.track)
+
+	content_h := layout.content_h
+	if content_h <= 0 {
+		return
+	}
+	thumb_h := max(core.dip(26), track_h * track_h / content_h)
+	travel := max(track_h - thumb_h, 0)
+	thumb_y := top + travel * layout.scroll / max(layout.scroll_max, 1)
+	thumb := win.RECT{x, thumb_y, x + core.dip(3), thumb_y + thumb_h}
+	_ = win.FillRect(dc, &thumb, core.app.brushes.thumb)
 }
 
 draw_switch :: proc(dc: win.HDC, rect: win.RECT, on: bool, enabled: bool) {
