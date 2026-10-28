@@ -10,10 +10,25 @@ foreign import psapi "system:Psapi.lib"
 foreign import pdh "system:Pdh.lib"
 foreign import iphlpapi "system:iphlpapi.lib"
 foreign import comdlg32 "system:Comdlg32.lib"
+foreign import shell32 "system:Shell32.lib"
 
 CC_RGBINIT   :: 0x00000001
 CC_FULLOPEN  :: 0x00000002
 CC_ANYCOLOR  :: 0x00000100
+
+SHGFI_ICON      :: 0x00000100
+SHGFI_LARGEICON :: 0x00000000
+DI_NORMAL       :: 0x0003
+
+SHFILEINFOW :: struct {
+	hIcon:         win.HICON,
+	iIcon:         i32,
+	dwAttributes:  win.DWORD,
+	szDisplayName: [win.MAX_PATH]u16,
+	szTypeName:    [80]u16,
+}
+
+#assert(size_of(SHFILEINFOW) == 696)
 
 CHOOSECOLORW :: struct {
 	lStructSize:    win.DWORD,
@@ -37,6 +52,15 @@ foreign comdlg32 {
 @(default_calling_convention="system")
 foreign user32 {
 	DrawTextW :: proc(hdc: win.HDC, text: win.LPCWSTR, length: i32, rect: ^win.RECT, format: u32) -> i32 ---
+	DrawIconEx :: proc(
+		hdc: win.HDC,
+		x_left, y_top: i32,
+		icon: win.HICON,
+		width, height: i32,
+		step_if_ani_cur: u32,
+		flicker_free_brush: win.HBRUSH,
+		flags: u32,
+	) -> win.BOOL ---
 }
 
 @(default_calling_convention="system")
@@ -49,6 +73,12 @@ foreign gdi32 {
 foreign kernel32 {
 	GetSystemTimes :: proc(idle: ^win.FILETIME, kernel: ^win.FILETIME, user: ^win.FILETIME) -> win.BOOL ---
 	GetTickCount64 :: proc() -> u64 ---
+	QueryFullProcessImageNameW :: proc(
+		process: win.HANDLE,
+		flags: win.DWORD,
+		name: win.LPWSTR,
+		size: ^win.DWORD,
+	) -> win.BOOL ---
 	GetProcessHandleCount :: proc(process: win.HANDLE, count: ^u32) -> win.BOOL ---
 	GetProcessIoCounters :: proc(process: win.HANDLE, counters: ^Io_Counters) -> win.BOOL ---
 }
@@ -128,6 +158,17 @@ Pdh_Fmt_Counter_Value_Item :: struct {
 }
 
 #assert(size_of(Pdh_Fmt_Counter_Value_Item) == 24)
+
+@(default_calling_convention="system")
+foreign shell32 {
+	SHGetFileInfoW :: proc(
+		path: win.LPCWSTR,
+		file_attributes: win.DWORD,
+		info: ^SHFILEINFOW,
+		info_size: win.UINT,
+		flags: win.UINT,
+	) -> uintptr ---
+}
 
 @(default_calling_convention="system")
 foreign pdh {

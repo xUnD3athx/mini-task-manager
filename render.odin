@@ -881,7 +881,7 @@ draw_process_row :: proc(dc: win.HDC, p: ^Process, left, right, y, row_h: i32) {
 	badge_size := S(28)
 	bx := left + margin + S(13)
 	by := y + (row_h - badge_size) / 2
-	draw_row_badge(dc, p.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
+	draw_task_icon(dc, p.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
 
 	tx := bx + badge_size + S(11)
 	tw := right - margin - S(16) - tx
@@ -936,7 +936,24 @@ sort_extra_text :: proc(buf: []u8, gpu: f32, io_bps: f64) -> string {
 	return ""
 }
 
-draw_row_badge :: proc(dc: win.HDC, name: [MAX_NAME_U16]u16, rect: win.RECT, highlighted: bool) {
+// Prefer the executable's shell icon; the letter badge remains the fallback
+// for processes whose icon cannot be read.
+draw_task_icon :: proc(dc: win.HDC, name: [MAX_NAME_U16]u16, rect: win.RECT, highlighted: bool) {
+	icon := icon_for_task_name(name)
+	if icon == nil {
+		draw_letter_badge(dc, name, rect, highlighted)
+		return
+	}
+
+	width := rect.right - rect.left
+	height := rect.bottom - rect.top
+	size := min(width, height)
+	x := rect.left + (width - size) / 2
+	y := rect.top + (height - size) / 2
+	_ = DrawIconEx(dc, x, y, icon, size, size, 0, nil, DI_NORMAL)
+}
+
+draw_letter_badge :: proc(dc: win.HDC, name: [MAX_NAME_U16]u16, rect: win.RECT, highlighted: bool) {
 	brush := app.brushes.badge
 	letter_color := COL_TEXT
 	if highlighted {
@@ -992,7 +1009,7 @@ draw_group_row :: proc(dc: win.HDC, g: ^Task_Group, left, right, y, row_h: i32) 
 	badge_size := S(28)
 	bx := left + S(36)
 	by := y + (row_h - badge_size) / 2
-	draw_row_badge(dc, g.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
+	draw_task_icon(dc, g.name, win.RECT{bx, by, bx + badge_size, by + badge_size}, selected)
 
 	tx := bx + badge_size + S(11)
 	tw := right - margin - S(16) - tx

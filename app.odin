@@ -2523,6 +2523,8 @@ delete_gdi :: proc(handle: $T) {
 }
 
 destroy_resources :: proc() {
+	destroy_icon_cache()
+
 	if app.pdh_query != nil {
 		_ = PdhCloseQuery(app.pdh_query)
 		app.pdh_query = nil
