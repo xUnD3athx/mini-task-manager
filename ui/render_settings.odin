@@ -140,7 +140,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 		layout.colors.right - layout.colors.left, core.dip(14),
 		core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)
 
-	dock_modes := [2]core.Dock_Mode{.top, .bottom}
+	dock_modes := [2]core.Dock_Mode{.top, .standalone}
 	dock_labels := core.DOCK_LABELS
 	for i in 0..<len(dock_modes) {
 		chip := settings_dock_chip_rect(layout, i)

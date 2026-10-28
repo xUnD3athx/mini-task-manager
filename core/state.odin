@@ -127,14 +127,16 @@ Module_Flags :: struct {
 }
 
 Dock_Mode :: enum {
+	// An appbar pinned to the top edge; the drawer opens downward.
 	top,
-	bottom,
+	// A normal topmost window that does not reserve any screen edge.
+	standalone,
 }
 
-DOCK_LABELS :: [2]string{"TOP", "BOTTOM"}
+DOCK_LABELS :: [2]string{"TOP", "STANDALONE"}
 DOCK_HINTS :: [2]string{
 	"Pinned to the top edge and reserves it.",
-	"Pinned to the bottom edge; the drawer opens upward.",
+	"A floating window; drag the bar to move it.",
 }
 
 Settings :: struct {
@@ -594,6 +596,8 @@ App :: struct {
 	bar_rect:           win.RECT,
 	appbar_registered:  bool,
 	appbar_moving:      bool,
+	// Screen position of the standalone window, kept while switching modes.
+	standalone_pos:     win.POINT,
 
 	width, height: i32,
 	// Full height the drawer is laid out at. It stays at the open height while

@@ -12,24 +12,23 @@ handle_click :: proc(lparam: win.LPARAM) {
 	x := i32(lparam & 0xffff)
 	y := i32((lparam >> 16) & 0xffff)
 
-	// While the drawer animates, the window shows a slice of the full layout.
-	// Bottom docking anchors that slice to the bottom edge.
-	if core.app.anim.active && core.settings.dock == .bottom {
-		y += core.app.layout_h - core.app.height
-	}
-
-	if bar_y := y - ui.bar_top(); bar_y >= 0 && bar_y < core.app.bar_h {
-		if core.point_in_rect(x, bar_y, ui.tasks_button_rect()) {
+	if y >= 0 && y < core.app.bar_h {
+		if core.point_in_rect(x, y, ui.tasks_button_rect()) {
 			toggle_view(.tasks)
 			return
 		}
-		if core.point_in_rect(x, bar_y, ui.settings_button_rect()) {
+		if core.point_in_rect(x, y, ui.settings_button_rect()) {
 			toggle_view(.settings)
 			return
 		}
-		if core.point_in_rect(x, bar_y, ui.exit_button_rect()) {
+		if core.point_in_rect(x, y, ui.exit_button_rect()) {
 			_ = win.PostMessageW(core.app.hwnd, win.WM_CLOSE, 0, 0)
 			return
+		}
+		// The empty part of a standalone bar drags the whole window; an
+		// appbar stays where it is.
+		if core.settings.dock == .standalone && !core.app.anim.active {
+			drag_window()
 		}
 		return
 	}
@@ -46,6 +45,13 @@ handle_click :: proc(lparam: win.LPARAM) {
 		handle_settings_click(x, y)
 	case .none:
 	}
+}
+
+// Hands the bar over to the system move loop. Only standalone windows can be
+// dragged; an appbar is pinned by Explorer.
+drag_window :: proc() {
+	_ = win.ReleaseCapture()
+	_ = win.SendMessageW(core.app.hwnd, win.WM_NCLBUTTONDOWN, win.WPARAM(win.HTCAPTION), 0)
 }
 
 handle_tasks_click :: proc(x, y: i32) {
@@ -231,7 +237,7 @@ handle_settings_click :: proc(x, y: i32) {
 		}
 	}
 
-	dock_modes := [2]core.Dock_Mode{.top, .bottom}
+	dock_modes := [2]core.Dock_Mode{.top, .standalone}
 	for i in 0..<len(dock_modes) {
 		if core.point_in_rect(x, y, ui.settings_dock_chip_rect(layout, i)) {
 			settings_set_dock(dock_modes[i])
@@ -304,10 +310,14 @@ settings_set_dock :: proc(mode: core.Dock_Mode) {
 	core.app.deactivate_guard_until = platform.GetTickCount64() + 600
 	core.save_settings()
 
-	if !core.app.appbar_registered {
-		register_appbar(core.app.hwnd)
+	if mode == .top {
+		if !core.app.appbar_registered {
+			register_appbar(core.app.hwnd)
+		}
+		position_appbar(core.app.hwnd)
+	} else {
+		enter_standalone(core.app.hwnd)
 	}
-	position_appbar(core.app.hwnd)
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 

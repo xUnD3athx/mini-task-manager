@@ -95,8 +95,12 @@ hinstance := win.HINSTANCE(win.GetModuleHandleW(nil))
 	}
 	core.app.hwnd = hwnd
 
-	register_appbar(hwnd)
-	position_appbar(hwnd)
+	if core.settings.dock == .top {
+		register_appbar(hwnd)
+		position_appbar(hwnd)
+	} else {
+		enter_standalone(hwnd)
+	}
 
 	_ = win.ShowWindow(hwnd, win.SW_SHOWNOACTIVATE)
 	_ = win.UpdateWindow(hwnd)
@@ -139,6 +143,12 @@ window_proc :: proc "system" (
 		update_client_size(hwnd)
 		return 0
 
+	case win.WM_MOVE:
+		if core.settings.dock == .standalone {
+			update_standalone_rect(hwnd)
+		}
+		return 0
+
 	case win.WM_PAINT:
 		paint_window(hwnd)
 		return 0
@@ -173,10 +183,10 @@ window_proc :: proc "system" (
 		pt: win.POINT
 		_ = win.GetCursorPos(&pt)
 		_ = win.ScreenToClient(hwnd, &pt)
-		if bar_y := pt.y - ui.bar_top(); bar_y >= 0 && bar_y < core.app.bar_h &&
-		   !core.point_in_rect(pt.x, bar_y, ui.tasks_button_rect()) &&
-		   !core.point_in_rect(pt.x, bar_y, ui.settings_button_rect()) &&
-		   !core.point_in_rect(pt.x, bar_y, ui.exit_button_rect()) {
+		if pt.y >= 0 && pt.y < core.app.bar_h &&
+		   !core.point_in_rect(pt.x, pt.y, ui.tasks_button_rect()) &&
+		   !core.point_in_rect(pt.x, pt.y, ui.settings_button_rect()) &&
+		   !core.point_in_rect(pt.x, pt.y, ui.exit_button_rect()) {
 			return MA_NOACTIVATE
 		}
 		return MA_ACTIVATE
@@ -218,7 +228,11 @@ window_proc :: proc "system" (
 		hide_view_now()
 		services.destroy_window_preview()
 		update_screen_metrics()
-		position_appbar(hwnd)
+		if core.settings.dock == .top {
+			position_appbar(hwnd)
+		} else {
+			enter_standalone(hwnd)
+		}
 		return 0
 
 	case win.WM_DESTROY:
@@ -276,10 +290,8 @@ remove_appbar :: proc(hwnd: win.HWND) {
 	core.app.appbar_registered = false
 }
 
+// Room below the bar. A standalone window dragged down leaves less of it.
 drawer_room :: proc() -> i32 {
-	if core.settings.dock == .bottom {
-		return core.app.bar_rect.top
-	}
 	return core.app.screen_h - core.app.bar_rect.top
 }
 
@@ -300,15 +312,11 @@ set_window_height :: proc(height: i32) {
 	if core.app.hwnd == nil || height <= 0 {
 		return
 	}
-	y := core.app.bar_rect.top
-	if core.settings.dock == .bottom {
-		y = core.app.bar_rect.bottom - height
-	}
 	_ = win.SetWindowPos(
 		core.app.hwnd,
 		win.HWND_TOPMOST,
 		core.app.bar_rect.left,
-		y,
+		core.app.bar_rect.top,
 		core.app.bar_rect.right - core.app.bar_rect.left,
 		height,
 		win.SWP_NOACTIVATE,
@@ -329,6 +337,9 @@ apply_window_rect :: proc() {
 }
 
 position_appbar :: proc(hwnd: win.HWND) {
+	if core.settings.dock != .top {
+		return
+	}
 	if core.app.appbar_moving {
 		return
 	}
@@ -338,35 +349,42 @@ position_appbar :: proc(hwnd: win.HWND) {
 	abd: win.APPBARDATA
 	abd.cbSize = u32(size_of(win.APPBARDATA))
 	abd.hWnd = hwnd
-
-	if core.settings.dock == .bottom {
-		abd.uEdge = win.ABE_BOTTOM
-		abd.rc = win.RECT{0, core.app.screen_h - core.app.bar_h, core.app.screen_w, core.app.screen_h}
-	} else {
-		abd.uEdge = win.ABE_TOP
-		abd.rc = win.RECT{0, 0, core.app.screen_w, core.app.bar_h}
-	}
+	abd.uEdge = win.ABE_TOP
+	abd.rc = win.RECT{0, 0, core.app.screen_w, core.app.bar_h}
 
 	if core.app.appbar_registered {
 		_ = win.SHAppBarMessage(win.ABM_QUERYPOS, &abd)
-		if core.settings.dock == .bottom {
-			abd.rc.top = abd.rc.bottom - core.app.bar_h
-		} else {
-			abd.rc.bottom = abd.rc.top + core.app.bar_h
-		}
+		abd.rc.bottom = abd.rc.top + core.app.bar_h
 		_ = win.SHAppBarMessage(win.ABM_SETPOS, &abd)
 	}
 
 	if abd.rc.right <= abd.rc.left || abd.rc.bottom <= abd.rc.top {
-		if core.settings.dock == .bottom {
-			abd.rc = win.RECT{0, core.app.screen_h - core.app.bar_h, core.app.screen_w, core.app.screen_h}
-		} else {
-			abd.rc = win.RECT{0, 0, core.app.screen_w, core.app.bar_h}
-		}
+		abd.rc = win.RECT{0, 0, core.app.screen_w, core.app.bar_h}
 	}
 	core.app.bar_rect = abd.rc
 
 	apply_window_rect()
+}
+
+// Leaves the appbar and remembers the last standalone position. The bar is
+// kept on screen vertically; the width still spans the display for now.
+enter_standalone :: proc(hwnd: win.HWND) {
+	remove_appbar(hwnd)
+	x := i32(0)
+	y := clamp(core.app.standalone_pos.y, 0, core.app.screen_h - core.app.bar_h)
+	core.app.standalone_pos = win.POINT{x = x, y = y}
+	core.app.bar_rect = win.RECT{x, y, x + core.app.screen_w, y + core.app.bar_h}
+	apply_window_rect()
+}
+
+// Dragging moves the window itself, so the bar rect follows it.
+update_standalone_rect :: proc(hwnd: win.HWND) {
+	rect: win.RECT
+	if !win.GetWindowRect(hwnd, &rect) {
+		return
+	}
+	core.app.bar_rect = win.RECT{rect.left, rect.top, rect.right, rect.top + core.app.bar_h}
+	core.app.standalone_pos = win.POINT{x = rect.left, y = rect.top}
 }
 
 open_view :: proc(view: core.Drawer_View) {
@@ -513,18 +531,13 @@ paint_window :: proc(hwnd: win.HWND) {
 		ui.paint(core.app.mem_dc)
 	}
 
-	// Only the part the window currently covers is copied out. With a bottom
-	// dock the bar sits at the bottom of the full layout, so the source slice
-	// is anchored to its bottom edge.
+	// The bar is anchored to the top of the layout, so the window shows the
+	// matching top slice while the drawer animates.
 	client_h := min(core.app.height, core.app.layout_h)
 	if client_h <= 0 {
 		return
 	}
-	src_y: i32 = 0
-	if core.settings.dock == .bottom {
-		src_y = core.app.layout_h - client_h
-	}
-	_ = win.BitBlt(hdc, 0, 0, core.app.width, client_h, core.app.mem_dc, 0, src_y, win.SRCCOPY)
+	_ = win.BitBlt(hdc, 0, 0, core.app.width, client_h, core.app.mem_dc, 0, 0, win.SRCCOPY)
 }
 
 resize_backbuffer :: proc() {

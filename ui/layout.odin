@@ -52,26 +52,12 @@ tasks_panel_width :: proc() -> i32 {
 	return w
 }
 
-// The window hosts the bar at its top (pinned top) or at its bottom (pinned
-// bottom); the drawer fills the remainder.
-bar_top :: proc() -> i32 {
-	if core.settings.dock == .bottom {
-		return core.app.layout_h - core.app.bar_h
-	}
-	return 0
-}
-
+// The bar sits at the top of the window and the drawer fills the remainder.
 drawer_top :: proc() -> i32 {
-	if core.settings.dock == .bottom {
-		return 0
-	}
 	return core.app.bar_h
 }
 
 drawer_bottom :: proc() -> i32 {
-	if core.settings.dock == .bottom {
-		return core.app.layout_h - core.app.bar_h
-	}
 	return core.app.layout_h
 }
 
