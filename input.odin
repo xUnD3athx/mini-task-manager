@@ -12,6 +12,12 @@ handle_click :: proc(lparam: win.LPARAM) {
 	x := i32(lparam & 0xffff)
 	y := i32((lparam >> 16) & 0xffff)
 
+	// While the drawer animates, the window shows a slice of the full layout.
+	// Bottom docking anchors that slice to the bottom edge.
+	if core.app.anim.active && core.settings.dock == .bottom {
+		y += core.app.layout_h - core.app.height
+	}
+
 	if bar_y := y - ui.bar_top(); bar_y >= 0 && bar_y < core.app.bar_h {
 		if core.point_in_rect(x, bar_y, ui.tasks_button_rect()) {
 			toggle_view(.tasks)
@@ -25,6 +31,11 @@ handle_click :: proc(lparam: win.LPARAM) {
 			_ = win.PostMessageW(core.app.hwnd, win.WM_CLOSE, 0, 0)
 			return
 		}
+		return
+	}
+
+	// Drawer content is only reliable once the slide has settled.
+	if core.app.anim.active {
 		return
 	}
 
@@ -257,7 +268,7 @@ handle_refresh_edit_char :: proc(ch: int) {
 }
 
 handle_wheel :: proc(wparam: win.WPARAM) {
-	if core.app.view != .tasks {
+	if core.app.anim.active || core.app.view != .tasks {
 		return
 	}
 

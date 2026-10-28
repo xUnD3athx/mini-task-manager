@@ -56,7 +56,7 @@ tasks_panel_width :: proc() -> i32 {
 // bottom); the drawer fills the remainder.
 bar_top :: proc() -> i32 {
 	if core.settings.dock == .bottom {
-		return core.app.height - core.app.bar_h
+		return core.app.layout_h - core.app.bar_h
 	}
 	return 0
 }
@@ -70,9 +70,9 @@ drawer_top :: proc() -> i32 {
 
 drawer_bottom :: proc() -> i32 {
 	if core.settings.dock == .bottom {
-		return core.app.height - core.app.bar_h
+		return core.app.layout_h - core.app.bar_h
 	}
-	return core.app.height
+	return core.app.layout_h
 }
 
 tasks_geometry :: proc() -> Tasks_Geometry {
@@ -83,7 +83,7 @@ tasks_geometry :: proc() -> Tasks_Geometry {
 	}
 
 	bottom := drawer_top() + core.app.drawer_h
-	if core.app.view != .none && core.app.height > core.app.bar_h {
+	if core.app.view != .none && core.app.layout_h > core.app.bar_h {
 		bottom = drawer_bottom()
 	}
 	top := drawer_top() + pad

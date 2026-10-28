@@ -7,15 +7,15 @@ import "../platform"
 // 绘制基础：双缓冲入口、文字、圆角矩形、卡片。
 
 paint :: proc(dc: win.HDC) {
-	if core.app.width <= 0 || core.app.height <= 0 {
+	if core.app.width <= 0 || core.app.layout_h <= 0 {
 		return
 	}
 	_ = win.SetBkMode(dc, win.BKMODE.TRANSPARENT)
 
-	full := win.RECT{0, 0, core.app.width, core.app.height}
+	full := win.RECT{0, 0, core.app.width, core.app.layout_h}
 	_ = win.FillRect(dc, &full, core.app.brushes.bg)
 
-	if core.app.view != .none && core.app.height > core.app.bar_h {
+	if core.app.view != .none && core.app.layout_h > core.app.bar_h {
 		gdiplus_begin(dc)
 		draw_drawer(dc)
 		gdiplus_end()

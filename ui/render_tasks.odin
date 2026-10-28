@@ -37,7 +37,7 @@ draw_drawer :: proc(dc: win.HDC) {
 		services.hide_preview_thumbnail()
 	}
 
-	bottom := win.RECT{0, core.app.height - 1, core.app.width, core.app.height}
+	bottom := win.RECT{0, core.app.layout_h - 1, core.app.width, core.app.layout_h}
 	_ = win.FillRect(dc, &bottom, core.app.brushes.line)
 }
 

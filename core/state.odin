@@ -6,6 +6,10 @@ import "../platform"
 // 全局状态、数据类型、设置结构和基础辅助。
 
 TIMER_ID :: 1
+// Drives the drawer open/close animation; separate from the metrics refresh so
+// the two can run at different rates.
+ANIM_TIMER_ID :: 2
+DRAWER_ANIM_MS :: 170
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
@@ -330,6 +334,20 @@ Drawer_View :: enum {
 	settings,
 }
 
+// The window height moves between the bar and the open drawer, while the
+// drawer keeps its full layout height and is clipped to the window. That way
+// nothing inside reflows while the drawer slides out.
+Drawer_Anim :: struct {
+	active:   bool,
+	opening:  bool,
+	from_h:   i32,
+	to_h:     i32,
+	start_ms: u64,
+	// While animating, paints reuse the full-height frame rendered at the start
+	// so each step is a cheap copy instead of a full redraw.
+	frozen:   bool,
+}
+
 If_Counter :: struct {
 	index:     u32,
 	bytes_in:  u32,
@@ -578,6 +596,10 @@ App :: struct {
 	appbar_moving:      bool,
 
 	width, height: i32,
+	// Full height the drawer is laid out at. It stays at the open height while
+	// the window animates, so the content is clipped rather than reflowed.
+	layout_h: i32,
+	anim:     Drawer_Anim,
 	mem_dc:        win.HDC,
 	mem_bmp:       win.HBITMAP,
 

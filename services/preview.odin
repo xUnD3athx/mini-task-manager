@@ -130,7 +130,9 @@ find_group_window :: proc(name: [core.MAX_NAME_U16]u16) -> win.HWND {
 }
 
 refresh_window_preview :: proc() {
-	wanted := core.app.view == .tasks && core.app.has_selection
+	// No preview while the drawer slides: it is a separate window and would
+	// float over the shrinking panel.
+	wanted := core.app.view == .tasks && core.app.has_selection && !core.app.anim.active
 
 	hwnd: win.HWND = nil
 	if wanted {

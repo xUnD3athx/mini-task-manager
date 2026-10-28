@@ -144,6 +144,10 @@ window_proc :: proc "system" (
 		return 0
 
 	case win.WM_TIMER:
+		if wparam == core.ANIM_TIMER_ID {
+			step_drawer_anim()
+			return 0
+		}
 		if wparam == core.TIMER_ID {
 			if !core.app.pdh_attempted {
 				services.init_pdh_counters()
@@ -163,6 +167,9 @@ window_proc :: proc "system" (
 		return 1
 
 	case win.WM_MOUSEACTIVATE:
+		if core.app.anim.active {
+			return MA_ACTIVATE
+		}
 		pt: win.POINT
 		_ = win.GetCursorPos(&pt)
 		_ = win.ScreenToClient(hwnd, &pt)
@@ -185,7 +192,7 @@ window_proc :: proc "system" (
 	case win.WM_ACTIVATE:
 		if u16(wparam & 0xffff) == win.WA_INACTIVE && core.app.view != .none &&
 		   !core.app.color_dialog_open && platform.GetTickCount64() >= core.app.deactivate_guard_until {
-			set_view(.none)
+			close_view()
 		}
 		return 0
 
@@ -202,13 +209,13 @@ window_proc :: proc "system" (
 				return 0
 			}
 			if core.app.view != .none {
-				set_view(.none)
+				close_view()
 				return 0
 			}
 		}
 
 	case win.WM_DISPLAYCHANGE:
-		core.app.view = .none
+		hide_view_now()
 		services.destroy_window_preview()
 		update_screen_metrics()
 		position_appbar(hwnd)
@@ -217,6 +224,7 @@ window_proc :: proc "system" (
 	case win.WM_DESTROY:
 		remove_appbar(hwnd)
 		_ = win.KillTimer(hwnd, core.TIMER_ID)
+		_ = win.KillTimer(hwnd, core.ANIM_TIMER_ID)
 		services.destroy_window_preview()
 		core.destroy_backbuffer()
 		destroy_resources()
@@ -275,28 +283,27 @@ drawer_room :: proc() -> i32 {
 	return core.app.screen_h - core.app.bar_rect.top
 }
 
-apply_window_rect :: proc() {
-	if core.app.hwnd == nil {
-		return
-	}
-
-	height := core.app.bar_h
-	if core.app.view != .none {
-		height += core.app.drawer_h
-		room := drawer_room()
-		if height > room {
-			height = room
-		}
+// Full height of the open drawer, clamped to the room the appbar leaves.
+drawer_open_height :: proc() -> i32 {
+	height := core.app.bar_h + core.app.drawer_h
+	room := drawer_room()
+	if height > room {
+		height = room
 	}
 	if height < core.app.bar_h {
 		height = core.app.bar_h
 	}
+	return height
+}
 
+set_window_height :: proc(height: i32) {
+	if core.app.hwnd == nil || height <= 0 {
+		return
+	}
 	y := core.app.bar_rect.top
 	if core.settings.dock == .bottom {
 		y = core.app.bar_rect.bottom - height
 	}
-
 	_ = win.SetWindowPos(
 		core.app.hwnd,
 		win.HWND_TOPMOST,
@@ -306,6 +313,18 @@ apply_window_rect :: proc() {
 		height,
 		win.SWP_NOACTIVATE,
 	)
+}
+
+apply_window_rect :: proc() {
+	if core.app.hwnd == nil {
+		return
+	}
+
+	height := core.app.bar_h
+	if core.app.view != .none {
+		height = drawer_open_height()
+	}
+	set_window_height(height)
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 
@@ -350,25 +369,112 @@ position_appbar :: proc(hwnd: win.HWND) {
 	apply_window_rect()
 }
 
-set_view :: proc(view: core.Drawer_View) {
-	if core.app.view == view {
-		return
+open_view :: proc(view: core.Drawer_View) {
+	if core.app.view != view {
+		core.app.view = view
+		core.app.refresh_edit = false
+		core.app.layout_h = drawer_open_height()
+		resize_backbuffer()
 	}
-	core.app.view = view
-	core.app.refresh_edit = false
-
-	apply_window_rect()
-	services.refresh_window_preview()
+	start_drawer_anim(true)
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 
+close_view :: proc() {
+	if core.app.view == .none && !core.app.anim.active {
+		return
+	}
+	// The preview is a separate top-level window, so it must not linger over
+	// the drawer while it shrinks.
+	services.destroy_window_preview()
+	start_drawer_anim(false)
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+hide_view_now :: proc() {
+	core.app.anim.active = false
+	core.app.anim.frozen = false
+	_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
+	core.app.view = .none
+	core.app.layout_h = core.app.bar_h
+}
+
 toggle_view :: proc(view: core.Drawer_View) {
-	if core.app.view == view {
-		set_view(.none)
+	// A click during the closing animation reopens instead of doing nothing.
+	closing := core.app.anim.active && !core.app.anim.opening
+	if core.app.view == view && !closing {
+		close_view()
 		return
 	}
 	_ = win.SetForegroundWindow(core.app.hwnd)
-	set_view(view)
+	open_view(view)
+}
+
+// Height moves along an ease-out curve: fast at first, settling at the end.
+start_drawer_anim :: proc(opening: bool) {
+	anim := &core.app.anim
+	target := opening ? core.app.layout_h : core.app.bar_h
+	anim.active = true
+	anim.opening = opening
+	anim.from_h = core.app.height
+	anim.to_h = target
+
+	// Render the full frame once, so the steps only copy a slice of it. Doing
+	// this before the clock starts keeps the first frame from swallowing most
+	// of the animation.
+	if anim.from_h == target {
+		finish_drawer_anim()
+		return
+	}
+	if core.app.mem_dc != nil {
+		ui.paint(core.app.mem_dc)
+		anim.frozen = true
+	} else {
+		anim.frozen = false
+	}
+	anim.start_ms = platform.GetTickCount64()
+	_ = win.SetTimer(core.app.hwnd, core.ANIM_TIMER_ID, 15, nil)
+}
+
+step_drawer_anim :: proc() {
+	anim := &core.app.anim
+	if !anim.active {
+		_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
+		return
+	}
+
+	elapsed := platform.GetTickCount64() - anim.start_ms
+	t := min(f32(elapsed) / f32(core.DRAWER_ANIM_MS), 1.0)
+	eased := 1.0 - (1.0 - t)*(1.0 - t)*(1.0 - t)
+	height := anim.from_h + i32(f32(anim.to_h - anim.from_h) * eased)
+	if height != core.app.height {
+		set_window_height(height)
+		// Paint synchronously so a shrinking window never shows the desktop
+		// through the part that has not been blitted yet.
+		_ = win.UpdateWindow(core.app.hwnd)
+	}
+	if t >= 1.0 {
+		finish_drawer_anim()
+	}
+}
+
+finish_drawer_anim :: proc() {
+	anim := &core.app.anim
+	opening := anim.opening
+	anim.active = false
+	anim.frozen = false
+	_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
+
+	if opening {
+		services.refresh_window_preview()
+	} else {
+		core.app.view = .none
+		core.app.layout_h = core.app.bar_h
+		apply_window_rect()
+		resize_backbuffer()
+		services.refresh_window_preview()
+	}
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 
 update_client_size :: proc(hwnd: win.HWND) {
@@ -376,8 +482,15 @@ update_client_size :: proc(hwnd: win.HWND) {
 	_ = win.GetClientRect(hwnd, &rect)
 	core.app.width = rect.right - rect.left
 	core.app.height = rect.bottom - rect.top
+	if core.app.layout_h <= 0 {
+		core.app.layout_h = core.app.height
+	}
 	ui.clamp_scroll()
-	resize_backbuffer()
+	// While the drawer animates, the window is shorter than the layout; the
+	// backbuffer already has the full size.
+	if core.app.layout_h == core.app.height && !core.app.anim.active {
+		resize_backbuffer()
+	}
 	_ = win.InvalidateRect(hwnd, nil, win.FALSE)
 }
 
@@ -386,7 +499,7 @@ paint_window :: proc(hwnd: win.HWND) {
 	hdc := win.BeginPaint(hwnd, &ps)
 	defer _ = win.EndPaint(hwnd, &ps)
 
-	if core.app.width <= 0 || core.app.height <= 0 {
+	if core.app.width <= 0 || core.app.layout_h <= 0 {
 		return
 	}
 	if core.app.mem_dc == nil {
@@ -396,13 +509,27 @@ paint_window :: proc(hwnd: win.HWND) {
 		return
 	}
 
-	ui.paint(core.app.mem_dc)
-	_ = win.BitBlt(hdc, 0, 0, core.app.width, core.app.height, core.app.mem_dc, 0, 0, win.SRCCOPY)
+	if !(core.app.anim.active && core.app.anim.frozen) {
+		ui.paint(core.app.mem_dc)
+	}
+
+	// Only the part the window currently covers is copied out. With a bottom
+	// dock the bar sits at the bottom of the full layout, so the source slice
+	// is anchored to its bottom edge.
+	client_h := min(core.app.height, core.app.layout_h)
+	if client_h <= 0 {
+		return
+	}
+	src_y: i32 = 0
+	if core.settings.dock == .bottom {
+		src_y = core.app.layout_h - client_h
+	}
+	_ = win.BitBlt(hdc, 0, 0, core.app.width, client_h, core.app.mem_dc, 0, src_y, win.SRCCOPY)
 }
 
 resize_backbuffer :: proc() {
 	core.destroy_backbuffer()
-	if core.app.width <= 0 || core.app.height <= 0 {
+	if core.app.width <= 0 || core.app.layout_h <= 0 {
 		return
 	}
 
@@ -411,7 +538,7 @@ resize_backbuffer :: proc() {
 		return
 	}
 	dc := win.CreateCompatibleDC(screen)
-	bmp := win.CreateCompatibleBitmap(screen, core.app.width, core.app.height)
+	bmp := win.CreateCompatibleBitmap(screen, core.app.width, core.app.layout_h)
 	_ = win.ReleaseDC(core.app.hwnd, screen)
 
 	if dc == nil || bmp == nil {
