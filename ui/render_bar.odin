@@ -15,7 +15,7 @@ draw_bar :: proc(dc: win.HDC) {
 	draw_tasks_button(dc)
 
 	gap := core.dip(core.BAR_SECTION_GAP_DIP)
-	x := core.dip(core.BAR_PADDING_DIP) + core.dip(core.TASKS_BUTTON_W_DIP)
+	x := bar_content_left()
 	right_limit := core.app.width - core.dip(core.BAR_PADDING_DIP) - core.dip(core.BAR_RIGHT_RESERVE_DIP)
 
 	cpu_w := core.dip(180)
@@ -138,6 +138,7 @@ draw_bar_divider :: proc(dc: win.HDC, x: i32) {
 
 draw_tasks_button :: proc(dc: win.HDC) {
 	rect := tasks_button_rect()
+
 	background := core.app.brushes.badge
 	if core.app.view == .tasks {
 		background = core.app.brushes.selected
@@ -171,12 +172,16 @@ draw_tasks_button :: proc(dc: win.HDC) {
 	draw_text(dc, count_text, text_x, core.dip(28), text_w, core.dip(20),
 		core.app.fonts.stat, core.COL_TEXT, platform.DT_LEFT | platform.DT_SINGLELINE)
 
-	chevron := "▾"
-	if core.app.view == .tasks {
-		chevron = "▴"
+	// The chevron says the drawer opens and closes; a standalone drawer only
+	// switches views, so there is nothing to point at.
+	if core.settings.dock != .standalone {
+		chevron := "▾"
+		if core.app.view == .tasks {
+			chevron = "▴"
+		}
+		draw_text(dc, chevron, rect.right - core.dip(26), 0, core.dip(18), core.app.bar_h,
+			core.app.fonts.small, core.COL_MUTED, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
-	draw_text(dc, chevron, rect.right - core.dip(26), 0, core.dip(18), core.app.bar_h,
-		core.app.fonts.small, core.COL_MUTED, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 }
 
 draw_settings_button :: proc(dc: win.HDC, rect: win.RECT) {

@@ -337,6 +337,7 @@ settings_set_dock :: proc(mode: core.Dock_Mode) {
 	core.settings.dock = mode
 	core.app.deactivate_guard_until = platform.GetTickCount64() + 600
 	core.save_settings()
+	cancel_drawer_anim()
 
 	if mode == .top {
 		// The appbar drawer has its own height; the standalone one left the

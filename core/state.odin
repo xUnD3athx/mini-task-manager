@@ -26,11 +26,14 @@ GIB        :: 1024.0 * 1024.0 * 1024.0
 BAR_HEIGHT_DIP          :: 60
 BAR_PADDING_DIP         :: 16
 TASKS_BUTTON_W_DIP      :: 160
+// The standalone panel keeps the same look but leaves out the chevron and
+// some width, so the bar modules still get room.
+STANDALONE_TASKS_W_DIP  :: 136
 BAR_RIGHT_RESERVE_DIP   :: 158
 BAR_SECTION_GAP_DIP     :: 16
 DRAWER_HEIGHT_DIP       :: 540
-// A standalone window starts at 800x600 with the drawer open; a closed one
-// is just the bar.
+// A standalone window starts at 800x600 and is the open drawer; its bar is
+// part of the same window.
 STANDALONE_WIDTH_DIP      :: 800
 STANDALONE_HEIGHT_DIP     :: 600
 STANDALONE_MIN_WIDTH_DIP  :: 600

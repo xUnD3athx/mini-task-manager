@@ -215,7 +215,10 @@ window_proc :: proc "system" (
 		return 0
 
 	case win.WM_ACTIVATE:
+		// A standalone drawer is the window itself, so losing focus must not
+		// collapse it.
 		if u16(wparam & 0xffff) == win.WA_INACTIVE && core.app.view != .none &&
+		   core.settings.dock != .standalone &&
 		   !core.app.color_dialog_open && platform.GetTickCount64() >= core.app.deactivate_guard_until {
 			close_view()
 		}
@@ -240,12 +243,13 @@ window_proc :: proc "system" (
 		}
 
 	case win.WM_DISPLAYCHANGE:
-		hide_view_now()
 		services.destroy_window_preview()
 		update_screen_metrics()
 		if core.settings.dock == .top {
+			hide_view_now()
 			position_appbar(hwnd)
 		} else {
+			// The drawer stays open and is refitted to the new screen.
 			enter_standalone(hwnd)
 		}
 		return 0
@@ -392,19 +396,19 @@ position_appbar :: proc(hwnd: win.HWND) {
 }
 
 // Leaves the appbar and restores the last standalone position and size. The
-// width spans the window, not the display, so the bar reflows on its own.
+// drawer is the window here, so it is always open; only the view can change.
 enter_standalone :: proc(hwnd: win.HWND) {
 	remove_appbar(hwnd)
+	cancel_drawer_anim()
+	if core.app.view == .none {
+		core.app.view = .tasks
+	}
 	x := i32(0)
 	w := clamp(core.app.standalone_w, core.dip(core.STANDALONE_MIN_WIDTH_DIP), core.app.screen_w)
 	h := clamp(core.app.standalone_h, core.dip(core.STANDALONE_MIN_HEIGHT_DIP), core.app.screen_h)
-	// An open drawer has to fit on screen, so the bar moves up instead of the
+	// The open drawer has to fit on screen, so the bar moves up instead of the
 	// remembered height being cut down.
-	room := core.app.bar_h
-	if core.app.view != .none {
-		room = h
-	}
-	y := clamp(core.app.standalone_pos.y, 0, max(core.app.screen_h - room, 0))
+	y := clamp(core.app.standalone_pos.y, 0, max(core.app.screen_h - h, 0))
 	core.app.standalone_pos = win.POINT{x = x, y = y}
 	core.app.standalone_w = w
 	core.app.standalone_h = h
@@ -510,7 +514,22 @@ lift_standalone_open :: proc() {
 	)
 }
 
+// A slide belongs to the mode it started in; a mode switch refits the window
+// itself, so the animation must not resize it afterwards.
+cancel_drawer_anim :: proc() {
+	if !core.app.anim.active {
+		return
+	}
+	core.app.anim.active = false
+	core.app.anim.frozen = false
+	_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
+}
+
 close_view :: proc() {
+	// A standalone window is the drawer; there is nothing to collapse to.
+	if core.settings.dock == .standalone {
+		return
+	}
 	if core.app.view == .none && !core.app.anim.active {
 		return
 	}
@@ -530,6 +549,11 @@ hide_view_now :: proc() {
 }
 
 toggle_view :: proc(view: core.Drawer_View) {
+	// The floating window cannot be collapsed, so its bar only switches views.
+	if core.settings.dock == .standalone {
+		open_view(view)
+		return
+	}
 	// A click during the closing animation reopens instead of doing nothing.
 	closing := core.app.anim.active && !core.app.anim.opening
 	if core.app.view == view && !closing {

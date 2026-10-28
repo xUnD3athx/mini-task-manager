@@ -7,7 +7,21 @@ import "../services"
 // 布局与命中区域：绘制和点击共用这些矩形。
 
 tasks_button_rect :: proc() -> win.RECT {
+	if core.settings.dock == .standalone {
+		return win.RECT{core.dip(core.BAR_PADDING_DIP), 0,
+			core.dip(core.BAR_PADDING_DIP) + core.dip(core.STANDALONE_TASKS_W_DIP), core.app.bar_h}
+	}
 	return win.RECT{core.dip(core.BAR_PADDING_DIP), 0, core.dip(core.BAR_PADDING_DIP) + core.dip(core.TASKS_BUTTON_W_DIP), core.app.bar_h}
+}
+
+// Where the bar modules begin: the standalone bar only carries a task count,
+// so the modules get the rest of the room the button used to take.
+bar_content_left :: proc() -> i32 {
+	width: i32 = core.TASKS_BUTTON_W_DIP
+	if core.settings.dock == .standalone {
+		width = core.STANDALONE_TASKS_W_DIP
+	}
+	return core.dip(core.BAR_PADDING_DIP) + core.dip(width)
 }
 
 exit_button_rect :: proc() -> win.RECT {
