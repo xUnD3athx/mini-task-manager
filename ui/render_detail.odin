@@ -8,6 +8,23 @@ import "../services"
 
 // 选中任务详情：窗口预览、监控卡片、每核曲线带。
 
+// Risk of the currently selected task, including the aggregated tier of an
+// application group.
+selected_risk :: proc() -> (tier: core.Risk_Tier, reason: core.Risk_Reason) {
+	if core.app.group_selected {
+		for i in 0..<core.app.group_count {
+			if services.same_task_name(core.app.groups[i].name, core.app.selected_group) {
+				return core.app.groups[i].risk, core.app.groups[i].risk_reason
+			}
+		}
+		return .unknown, .no_signal
+	}
+	if p, found := services.find_process(core.app.selected_pid); found {
+		return p.risk, p.risk_reason
+	}
+	return .unknown, .no_signal
+}
+
 // Detail page for the selected task: its window on the left, a monitoring
 // dashboard of curves on the right.
 draw_task_view :: proc(dc: win.HDC) {
@@ -28,6 +45,7 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 
 	t := &core.app.task
 	p, found := services.find_process(core.app.selected_pid)
+	risk, risk_reason := selected_risk()
 
 	// Header: process or application name, PID/count and total CPU time.
 	time_buf: [32]u8
@@ -44,26 +62,57 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 		meta = fmt.bprintf(meta_buf[:], "PID %d · CPU time %s", core.app.selected_pid, time_value)
 	}
 
-	meta_w := min(core.dip(260), (layout.title.right - layout.title.left) / 2)
-	name_w := layout.title.right - layout.title.left - meta_w - core.dip(12)
-	if name_w < core.dip(60) {
-		name_w = core.dip(60)
+	title_w := layout.title.right - layout.title.left
+	pill_w := min(core.dip(150), title_w / 3)
+	pill_h := core.dip(20)
+	gap := core.dip(10)
+	meta_w := min(core.dip(230), title_w / 3)
+	name_max_w := title_w - meta_w - pill_w - gap*2
+	if name_max_w < core.dip(60) {
+		name_max_w = core.dip(60)
 	}
+
+	dash := [2]u16{0x2014, 0}
+	name_text: win.LPCWSTR = win.wstring(raw_data(dash[:]))
+	name_color := core.COL_MUTED
 	if core.app.group_selected {
-		draw_text_w(dc, win.wstring(raw_data(core.app.selected_group[:])), layout.title.left, layout.title.top,
-			name_w, layout.title.bottom - layout.title.top, core.app.fonts.title, core.COL_TEXT,
-			platform.DT_LEFT | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS | platform.DT_NOPREFIX)
+		name_text = win.wstring(raw_data(core.app.selected_group[:]))
+		name_color = core.COL_TEXT
 	} else if found {
-		draw_text_w(dc, win.wstring(raw_data(p.name[:])), layout.title.left, layout.title.top,
-			name_w, layout.title.bottom - layout.title.top, core.app.fonts.title, core.COL_TEXT,
-			platform.DT_LEFT | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS | platform.DT_NOPREFIX)
-	} else {
-		draw_text(dc, "—", layout.title.left, layout.title.top, name_w, layout.title.bottom - layout.title.top,
-			core.app.fonts.title, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)
+		name_text = win.wstring(raw_data(p.name[:]))
+		name_color = core.COL_TEXT
 	}
-	draw_text(dc, meta, layout.title.right - meta_w, layout.title.top,
-		meta_w, layout.title.bottom - layout.title.top, core.app.fonts.tiny, core.COL_MUTED,
+
+	_ = win.SelectObject(dc, win.HGDIOBJ(core.app.fonts.title))
+	measured := win.RECT{0, 0, name_max_w, layout.title.bottom - layout.title.top}
+	_ = platform.DrawTextW(dc, name_text, -1, &measured, platform.DT_CALCRECT | platform.DT_SINGLELINE | platform.DT_NOPREFIX)
+	name_w := min(measured.right - measured.left, name_max_w)
+	draw_text_w(dc, name_text, layout.title.left, layout.title.top,
+		name_w, layout.title.bottom - layout.title.top, core.app.fonts.title, name_color,
+		platform.DT_LEFT | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS | platform.DT_NOPREFIX)
+
+	pill_x := layout.title.left + name_w + gap
+	// A squeezed name can shrink the reserved space below the minimum width, so
+	// push the meta left instead of letting it run under the pill.
+	meta_x := max(layout.title.right - meta_w, pill_x + pill_w + gap)
+	draw_text(dc, meta, meta_x, layout.title.top,
+		layout.title.right - meta_x, layout.title.bottom - layout.title.top, core.app.fonts.tiny, core.COL_MUTED,
 		platform.DT_RIGHT | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
+
+	// The tier badge follows the task name instead of floating at the row's
+	// right edge, so the header reads name -> badge -> meta.
+	pill_y := layout.title.top + (layout.title.bottom - layout.title.top - pill_h)/2
+	pill := win.RECT{pill_x, pill_y, pill_x + pill_w, pill_y + pill_h}
+	fill_round(dc, pill, risk_brush(risk), core.app.pens.null, core.dip(7))
+
+	risk_buf: [32]u8
+	risk_text := core.risk_label(risk)
+	if label := core.risk_reason_label(risk_reason); len(label) > 0 {
+		risk_text = fmt.bprintf(risk_buf[:], "%s · %s", risk_text, label)
+	}
+	draw_text(dc, risk_text, pill.left, pill.top, pill.right - pill.left, pill.bottom - pill.top,
+		core.app.fonts.tiny, core.COL_BADGE_TEXT,
+		platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
 
 	cpu_buf: [16]u8
 	mem_buf: [32]u8

@@ -448,6 +448,10 @@ create_visual_objects :: proc() {
 	app.brushes.dark = win.CreateSolidBrush(colorref(COL_BADGE_TEXT))
 	app.brushes.light = win.CreateSolidBrush(colorref(COL_TEXT))
 	app.brushes.muted = win.CreateSolidBrush(colorref(COL_MUTED))
+	app.brushes.risk_safe = win.CreateSolidBrush(colorref(COL_RISK_SAFE))
+	app.brushes.risk_risky = win.CreateSolidBrush(colorref(COL_RISK_RISKY))
+	app.brushes.risk_blocked = win.CreateSolidBrush(colorref(COL_RISK_BLOCKED))
+	app.brushes.risk_unknown = win.CreateSolidBrush(colorref(COL_RISK_UNKNOWN))
 
 	app.pens.border = win.CreatePen(win.PS_SOLID, 1, colorref(theme.border))
 	app.pens.cpu = win.CreatePen(win.PS_SOLID, max(dip(2), 1), colorref(accent))
@@ -472,6 +476,10 @@ delete_visual_objects :: proc() {
 	delete_gdi(app.brushes.dark)
 	delete_gdi(app.brushes.light)
 	delete_gdi(app.brushes.muted)
+	delete_gdi(app.brushes.risk_safe)
+	delete_gdi(app.brushes.risk_risky)
+	delete_gdi(app.brushes.risk_blocked)
+	delete_gdi(app.brushes.risk_unknown)
 
 	delete_gdi(app.pens.border)
 	delete_gdi(app.pens.cpu)

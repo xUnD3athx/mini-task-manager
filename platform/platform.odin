@@ -81,6 +81,14 @@ foreign kernel32 {
 	) -> win.BOOL ---
 	GetProcessHandleCount :: proc(process: win.HANDLE, count: ^u32) -> win.BOOL ---
 	GetProcessIoCounters :: proc(process: win.HANDLE, counters: ^Io_Counters) -> win.BOOL ---
+	IsProcessCritical :: proc(process: win.HANDLE, critical: ^win.BOOL) -> win.BOOL ---
+	ProcessIdToSessionId :: proc(process_id: win.DWORD, session_id: ^win.DWORD) -> win.BOOL ---
+	GetProcessInformation :: proc(
+		process: win.HANDLE,
+		class:   u32,
+		info:    rawptr,
+		size:    win.DWORD,
+	) -> win.BOOL ---
 }
 
 Io_Counters :: struct {
@@ -263,6 +271,18 @@ PROCESS_QUERY_INFORMATION         :: 0x0400
 PROCESS_QUERY_LIMITED_INFORMATION :: 0x1000
 PROCESS_VM_READ                   :: 0x0010
 
+PROCESS_INFORMATION_CLASS_PROTECTION_LEVEL :: 7
+
+// Query results: PROTECTION_LEVEL_NONE means unprotected, and 0 is not that
+// value (0 is the WinTcb-Light level), so only NONE may be treated as safe.
+PROTECTION_LEVEL_NONE :: 0xFFFFFFFE
+
+Process_Protection_Level_Information :: struct {
+	protection_level: win.DWORD,
+}
+
+#assert(size_of(Process_Protection_Level_Information) == 4)
+
 DT_LEFT         :: u32(0x00000000)
 DT_CENTER       :: u32(0x00000001)
 DT_RIGHT        :: u32(0x00000002)
@@ -270,3 +290,4 @@ DT_VCENTER      :: u32(0x00000004)
 DT_SINGLELINE   :: u32(0x00000020)
 DT_END_ELLIPSIS :: u32(0x00008000)
 DT_NOPREFIX     :: u32(0x00000800)
+DT_CALCRECT     :: u32(0x00000400)

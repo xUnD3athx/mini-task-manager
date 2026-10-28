@@ -8,6 +8,24 @@ import "../services"
 
 // 任务抽屉：列表、分组行、进程行、滚动条。
 
+risk_brush :: proc(tier: core.Risk_Tier) -> win.HBRUSH {
+	switch tier {
+	case .blocked: return core.app.brushes.risk_blocked
+	case .risky:   return core.app.brushes.risk_risky
+	case .safe:    return core.app.brushes.risk_safe
+	case .unknown: return core.app.brushes.risk_unknown
+	}
+	return core.app.brushes.risk_unknown
+}
+
+// Draws the tier dot before a row's text and returns the horizontal space it
+// consumed, so name and subtitle stay aligned.
+draw_risk_dot :: proc(dc: win.HDC, tier: core.Risk_Tier, x, y: i32) -> i32 {
+	size := core.dip(7)
+	fill_round(dc, win.RECT{x, y, x + size, y + size}, risk_brush(tier), core.app.pens.null, size/2)
+	return size + core.dip(7)
+}
+
 draw_drawer :: proc(dc: win.HDC) {
 	switch core.app.view {
 	case .tasks:
@@ -154,6 +172,10 @@ draw_process_row :: proc(dc: win.HDC, p: ^core.Process, left, right, y, row_h: i
 		return
 	}
 
+	indent := draw_risk_dot(dc, p.risk, tx, y + core.dip(13))
+	tx += indent
+	tw -= indent
+
 	name := win.wstring(raw_data(p.name[:]))
 	name_w := tw
 	extra_buf: [32]u8
@@ -281,6 +303,10 @@ draw_group_row :: proc(dc: win.HDC, g: ^core.Task_Group, left, right, y, row_h: 
 	if tw < core.dip(20) {
 		return
 	}
+
+	indent := draw_risk_dot(dc, g.risk, tx, y + core.dip(13))
+	tx += indent
+	tw -= indent
 
 	extra_buf: [32]u8
 	extra := sort_extra_text(extra_buf[:], g.gpu_percent, g.io_bps)

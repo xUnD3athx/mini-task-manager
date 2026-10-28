@@ -1,5 +1,6 @@
 package services
 
+import "base:runtime"
 import win "core:sys/windows"
 import "../core"
 import "../platform"
@@ -11,6 +12,35 @@ lower_wide :: proc(c: u16) -> u16 {
 		return c + 32
 	}
 	return c
+}
+
+task_name_is :: proc(name: [core.MAX_NAME_U16]u16, candidate: string) -> bool {
+	if len(candidate) >= core.MAX_NAME_U16 {
+		return false
+	}
+	for i in 0..<len(candidate) {
+		c := name[i]
+		if c == 0 {
+			return false
+		}
+		cc := u16(candidate[i])
+		if cc >= 'A' && cc <= 'Z' {
+			cc += 32
+		}
+		if lower_wide(c) != cc {
+			return false
+		}
+	}
+	return name[len(candidate)] == 0
+}
+
+task_name_in :: proc(name: [core.MAX_NAME_U16]u16, candidates: []string) -> bool {
+	for candidate in candidates {
+		if task_name_is(name, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 same_task_name :: proc(a, b: [core.MAX_NAME_U16]u16) -> bool {
@@ -200,6 +230,10 @@ build_task_groups :: proc() {
 		g.working_set += p.working_set
 		g.gpu_percent += p.gpu_percent
 		g.io_bps += p.io_bps
+		if p.risk > g.risk {
+			g.risk = p.risk
+			g.risk_reason = p.risk_reason
+		}
 	}
 
 	for i in 1..<core.app.group_count {
@@ -265,6 +299,120 @@ find_process :: proc(pid: u32) -> (p: ^core.Process, found: bool) {
 	return nil, false
 }
 
+// Fallbacks for when the process cannot be queried: the critical flag wins
+// when it is readable, and these names cover the cases where it is not.
+CRITICAL_TASK_NAMES := [?]string{
+	"[system process]",
+	"system",
+	"registry",
+	"memory compression",
+	"secure system",
+	"system idle process",
+	"smss.exe",
+	"csrss.exe",
+	"wininit.exe",
+	"winlogon.exe",
+	"services.exe",
+	"lsass.exe",
+}
+
+// Session infrastructure restarts itself, but ending it visibly disrupts the
+// desktop, so it sits one tier below the critical set.
+SHELL_TASK_NAMES := [?]string{
+	"explorer.exe",
+	"dwm.exe",
+	"fontdrvhost.exe",
+	"sihost.exe",
+}
+
+visible_window_callback :: proc "system" (hwnd: win.HWND, lparam: win.LPARAM) -> win.BOOL {
+	context = runtime.default_context()
+
+	if win.IsWindowVisible(hwnd) == win.FALSE {
+		return win.TRUE
+	}
+	pid: win.DWORD
+	_ = win.GetWindowThreadProcessId(hwnd, &pid)
+
+	count := int(lparam)
+	for i in 0..<count {
+		if core.next_processes[i].pid == pid {
+			core.next_processes[i].has_window = true
+			break
+		}
+	}
+	return win.TRUE
+}
+
+// One EnumWindows pass per refresh answers "does this process own a visible
+// window", which is the strongest signal that it is a user application.
+mark_window_processes :: proc(count: int) {
+	if count <= 0 {
+		return
+	}
+	_ = win.EnumWindows(visible_window_callback, win.LPARAM(count))
+}
+
+classify_task_risk :: proc(p: ^core.Process, self_session: win.DWORD) {
+	p.risk = .blocked
+	p.risk_reason = .inspect_denied
+
+	handle := win.OpenProcess(platform.PROCESS_QUERY_LIMITED_INFORMATION, win.FALSE, p.pid)
+	defer _ = win.CloseHandle(handle)
+
+	if handle != nil {
+		critical: win.BOOL
+		if platform.IsProcessCritical(handle, &critical) && critical != win.FALSE {
+			p.risk_reason = .critical_process
+			return
+		}
+
+		protection: platform.Process_Protection_Level_Information
+		if platform.GetProcessInformation(
+			handle,
+			platform.PROCESS_INFORMATION_CLASS_PROTECTION_LEVEL,
+			rawptr(&protection),
+			u32(size_of(protection)),
+		) && protection.protection_level != platform.PROTECTION_LEVEL_NONE {
+			p.risk_reason = .protected_process
+			return
+		}
+	}
+
+	if task_name_in(p.name, CRITICAL_TASK_NAMES[:]) {
+		p.risk_reason = .critical_process
+		return
+	}
+	if task_name_in(p.name, SHELL_TASK_NAMES[:]) {
+		p.risk = .risky
+		p.risk_reason = .shell_component
+		return
+	}
+
+	// Services run in session 0 and stay classifiable even when the handle is
+	// denied, which is common for SYSTEM processes without elevation.
+	session: win.DWORD
+	if platform.ProcessIdToSessionId(p.pid, &session) && session != self_session {
+		p.risk = .risky
+		p.risk_reason = .system_session
+		return
+	}
+
+	if handle == nil {
+		// Same session yet unopenable: elevated or protected, so leave it blocked.
+		return
+	}
+
+	if p.has_window {
+		p.risk = .safe
+		p.risk_reason = .app_window
+		return
+	}
+
+	p.risk = .unknown
+	p.risk_reason = .no_signal
+}
+
 refresh_processes :: proc() {
 	now := platform.GetTickCount64()
 	elapsed_ms := now - core.app.last_process_ms
@@ -280,6 +428,9 @@ refresh_processes :: proc() {
 	entry.dwSize = u32(size_of(win.PROCESSENTRY32W))
 
 	count := 0
+
+	self_session: win.DWORD
+	_ = platform.ProcessIdToSessionId(win.GetCurrentProcessId(), &self_session)
 
 	for status := win.Process32FirstW(snap, &entry); status; status = win.Process32NextW(snap, &entry) {
 		if count >= core.MAX_PROCESSES {
@@ -359,6 +510,11 @@ refresh_processes :: proc() {
 		p.gpu_percent = gpu_usage_for_pid(p.pid)
 
 		count += 1
+	}
+
+	mark_window_processes(count)
+	for i in 0..<count {
+		classify_task_risk(&core.next_processes[i], self_session)
 	}
 
 	sort_processes(core.next_processes[:count])

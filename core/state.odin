@@ -38,6 +38,11 @@ COL_TEXT       :: Color{236, 236, 242}
 COL_MUTED      :: Color{148, 148, 163}
 COL_BADGE_TEXT :: Color{15, 15, 19}
 
+COL_RISK_SAFE    :: Color{94, 214, 143}
+COL_RISK_RISKY   :: Color{251, 146, 60}
+COL_RISK_BLOCKED :: Color{232, 90, 90}
+COL_RISK_UNKNOWN :: Color{148, 148, 163}
+
 Theme :: struct {
 	name:    string,
 	bg:      Color,
@@ -151,6 +156,51 @@ Sort_Field :: enum {
 }
 
 SORT_FIELD_LABELS :: [4]string{"CPU", "MEM", "GPU", "DISK"}
+
+// Windows only exposes two hard facts about a process (critical and protected);
+// everything else is inferred, so the tiers are ordered by how much damage
+// ending the task is expected to do. `unknown` means no signal, not danger.
+Risk_Tier :: enum u8 {
+	unknown,
+	safe,
+	risky,
+	blocked,
+}
+
+risk_label :: proc(tier: Risk_Tier) -> string {
+	switch tier {
+	case .unknown: return "UNKNOWN"
+	case .safe:    return "SAFE"
+	case .risky:   return "RISKY"
+	case .blocked: return "BLOCKED"
+	}
+	return "UNKNOWN"
+}
+
+Risk_Reason :: enum u8 {
+	none,
+	no_signal,
+	app_window,
+	shell_component,
+	system_session,
+	inspect_denied,
+	protected_process,
+	critical_process,
+}
+
+risk_reason_label :: proc(reason: Risk_Reason) -> string {
+	switch reason {
+	case .none:              return ""
+	case .no_signal:         return "no signal"
+	case .app_window:        return "app window"
+	case .shell_component:   return "shell"
+	case .system_session:    return "system session"
+	case .inspect_denied:    return "no access"
+	case .protected_process: return "protected"
+	case .critical_process:  return "critical"
+	}
+	return ""
+}
 
 // 0 means "all cores" (Max); -1 is the custom entry, which uses
 // settings.cores_custom instead of a fixed value.
@@ -334,6 +384,9 @@ Process :: struct {
 	io_bps:         f64,
 	io_read_total:  u64,
 	io_write_total: u64,
+	risk:           Risk_Tier,
+	risk_reason:    Risk_Reason,
+	has_window:     bool,
 }
 
 // Processes that share an executable name are shown as one application in the
@@ -345,6 +398,8 @@ Task_Group :: struct {
 	working_set: u64,
 	gpu_percent: f32,
 	io_bps:      f64,
+	risk:        Risk_Tier,
+	risk_reason: Risk_Reason,
 }
 
 List_Row_Kind :: enum {
@@ -400,7 +455,8 @@ Fonts :: struct {
 
 Brushes :: struct {
 	bg, sidebar, card, selected, badge, accent,
-	track, thumb, cpu_fill, mem_fill, gpu_fill, line, dark, light, muted: win.HBRUSH,
+	track, thumb, cpu_fill, mem_fill, gpu_fill, line, dark, light, muted,
+	risk_safe, risk_risky, risk_blocked, risk_unknown: win.HBRUSH,
 }
 
 Pens :: struct {
