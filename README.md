@@ -8,6 +8,7 @@
 - 并使用了 Windows AppBar 实现顶部栏效果
 ## 截图
 ![](screenshots/screenshot_expand.png)
+![](screenshots/screenshot_standalone.png)
 ## 使用
 打开 **mini-task-manager.exe** 即可使用
 ## 构建
