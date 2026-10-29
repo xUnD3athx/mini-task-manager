@@ -300,6 +300,7 @@ GDIP_FILL_MODE_WINDING    :: 1
 GDIP_UNIT_PIXEL           :: 2
 GDIP_LINE_JOIN_ROUND      :: 2
 GDIP_COMBINE_REPLACE      :: 0
+GDIP_COMBINE_INTERSECT    :: 1
 
 Gp_Point_F :: struct {
 	x: f32,

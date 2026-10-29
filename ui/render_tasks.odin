@@ -178,7 +178,7 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 	if gfx != nil {
 		_ = platform.GdipSetClipRect(gfx, f32(geo.panel.left + core.dip(1)), f32(geo.list_top),
 			f32(geo.panel.right - geo.panel.left - core.dip(2)), f32(geo.list_bottom - geo.list_top),
-			platform.GDIP_COMBINE_REPLACE)
+			platform.GDIP_COMBINE_INTERSECT)
 	}
 	rows_to_draw := geo.visible
 	if offset > 0 {
@@ -201,9 +201,7 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 				geo.panel.right, y, row_h)
 		}
 	}
-	if gfx != nil {
-		_ = platform.GdipResetClip(gfx)
-	}
+	gdiplus_reset_clip()
 	_ = win.RestoreDC(dc, saved)
 
 	draw_list_scrollbar(dc, geo.panel.right, geo.list_top, geo.list_bottom, geo.visible)

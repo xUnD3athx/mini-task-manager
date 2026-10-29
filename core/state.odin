@@ -14,6 +14,9 @@ DRAWER_ANIM_MS :: 170
 // something is still animating.
 UI_TIMER_ID :: 3
 UI_STEP_MS :: 15
+// Every redraw collects the live button rects so a pointer move can be matched
+// against what is actually on screen instead of repainting the whole window.
+HOVER_RECT_CAPACITY :: 128
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
@@ -676,6 +679,8 @@ App :: struct {
 	hover_rect:      win.RECT,
 	hover_last:      win.RECT,
 	hover_active:    bool,
+	hover_rects:     [HOVER_RECT_CAPACITY]win.RECT,
+	hover_rect_count: int,
 	ui_anim_running: bool,
 	last_process_ms: u64,
 	preview:         Window_Preview,

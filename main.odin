@@ -226,16 +226,14 @@ window_proc :: proc "system" (
 			}
 			_ = win.TrackMouseEvent(&tme)
 		}
-		// WM_PAINT is low priority and coalesces, so this cannot flood the
-		// message loop with paints while the pointer moves.
-		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		ui.invalidate_hover_transition(core.app.mouse_pos)
 		return 0
 
 	case win.WM_MOUSELEAVE:
 		core.app.mouse_inside = false
 		core.app.mouse_down = false
 		core.app.press_valid = false
-		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		ui.invalidate_rect(core.app.hover_last)
 		return 0
 
 	case win.WM_LBUTTONDOWN:
@@ -647,7 +645,7 @@ start_drawer_anim :: proc(opening: bool) {
 		return
 	}
 	if core.app.mem_dc != nil {
-		ui.paint(core.app.mem_dc)
+		ui.paint(core.app.mem_dc, win.RECT{0, 0, core.app.width, core.app.layout_h})
 		anim.frozen = true
 	} else {
 		anim.frozen = false
@@ -709,7 +707,17 @@ step_ui_anim :: proc() {
 	moved_tasks := step_scroll(&core.app.scroll, core.app.scroll_target)
 	moved_settings := step_scroll(&core.app.settings_scroll, core.app.settings_scroll_target)
 	moved_hover := step_hover()
-	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+
+	// Repaint only what the frame actually changed.
+	if moved_tasks {
+		ui.invalidate_tasks_scroll()
+	}
+	if moved_settings {
+		ui.invalidate_settings_scroll()
+	}
+	if moved_hover {
+		ui.invalidate_rect(core.app.hover_last)
+	}
 	if !moved_tasks && !moved_settings && !moved_hover {
 		core.stop_ui_anim()
 	}
@@ -802,17 +810,28 @@ paint_window :: proc(hwnd: win.HWND) {
 		return
 	}
 
-	if !(core.app.anim.active && core.app.anim.frozen) {
-		ui.paint(core.app.mem_dc)
-	}
-
 	// The bar is anchored to the top of the layout, so the window shows the
 	// matching top slice while the drawer animates.
 	client_h := min(core.app.height, core.app.layout_h)
 	if client_h <= 0 {
 		return
 	}
-	_ = win.BitBlt(hdc, 0, 0, core.app.width, client_h, core.app.mem_dc, 0, 0, win.SRCCOPY)
+	dirty := win.RECT{
+		max(ps.rcPaint.left, 0),
+		max(ps.rcPaint.top, 0),
+		min(ps.rcPaint.right, core.app.width),
+		min(ps.rcPaint.bottom, client_h),
+	}
+	if dirty.right <= dirty.left || dirty.bottom <= dirty.top {
+		return
+	}
+
+	if !(core.app.anim.active && core.app.anim.frozen) {
+		ui.paint(core.app.mem_dc, dirty)
+	}
+
+	_ = win.BitBlt(hdc, dirty.left, dirty.top, dirty.right - dirty.left, dirty.bottom - dirty.top,
+		core.app.mem_dc, dirty.left, dirty.top, win.SRCCOPY)
 }
 
 resize_backbuffer :: proc() {

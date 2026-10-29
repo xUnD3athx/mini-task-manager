@@ -33,7 +33,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 	if gfx != nil {
 		_ = platform.GdipSetClipRect(gfx, f32(layout.body.left), f32(layout.body.top),
 			f32(layout.body.right - layout.body.left), f32(layout.body.bottom - layout.body.top),
-			platform.GDIP_COMBINE_REPLACE)
+			platform.GDIP_COMBINE_INTERSECT)
 	}
 
 	draw_text(dc, "MODULES", layout.modules.left, layout.modules.top, layout.modules.right - layout.modules.left, core.dip(16),
@@ -308,9 +308,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 			core.app.fonts.small, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
 
-	if gfx != nil {
-		_ = platform.GdipResetClip(gfx)
-	}
+	gdiplus_reset_clip()
 	_ = win.RestoreDC(dc, saved)
 
 	// The footer sits in the card's padding, below the clipped body.

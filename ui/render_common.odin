@@ -6,10 +6,27 @@ import "../platform"
 
 // 绘制基础：双缓冲入口、文字、圆角矩形、卡片。
 
-paint :: proc(dc: win.HDC) {
+// Only the dirty rect is re-rendered, so scrolling and hover cost the pixels
+// they actually touch instead of the whole window. The backbuffer keeps the
+// rest of the last full frame.
+paint :: proc(dc: win.HDC, dirty: win.RECT) {
 	if core.app.width <= 0 || core.app.layout_h <= 0 {
 		return
 	}
+	clip := win.RECT{
+		max(dirty.left, 0),
+		max(dirty.top, 0),
+		min(dirty.right, core.app.width),
+		min(dirty.bottom, core.app.layout_h),
+	}
+	if clip.right <= clip.left || clip.bottom <= clip.top {
+		return
+	}
+	paint_dirty = clip
+
+	saved := win.SaveDC(dc)
+	_ = platform.IntersectClipRect(dc, clip.left, clip.top, clip.right, clip.bottom)
+
 	_ = win.SetBkMode(dc, win.BKMODE.TRANSPARENT)
 
 	full := win.RECT{0, 0, core.app.width, core.app.layout_h}
@@ -18,6 +35,7 @@ paint :: proc(dc: win.HDC) {
 	// Buttons claim this during the pass; whatever is left over is the control
 	// under the pointer this frame.
 	core.app.hover_rect = {}
+	core.app.hover_rect_count = 0
 
 	if core.app.view != .none && core.app.layout_h > core.app.bar_h {
 		gdiplus_begin(dc)
@@ -29,7 +47,47 @@ paint :: proc(dc: win.HDC) {
 	draw_bar(dc)
 	gdiplus_end()
 
+	_ = win.RestoreDC(dc, saved)
 	finish_hover_pass()
+}
+
+// The clip shared by every GDI+ pass of the current paint.
+paint_dirty: win.RECT
+
+// Repaints exactly these pixels of the backbuffer and the window.
+invalidate_rect :: proc(rect: win.RECT) {
+	if core.app.hwnd == nil || rect.right <= rect.left || rect.bottom <= rect.top {
+		return
+	}
+	// One pixel of slack keeps antialiased edges inside the redrawn area.
+	r := win.RECT{rect.left - 1, rect.top - 1, rect.right + 1, rect.bottom + 1}
+	_ = win.InvalidateRect(core.app.hwnd, &r, win.FALSE)
+}
+
+// Pointer movement only repaints when the control under the cursor changed,
+// and then only the old and new control rects.
+invalidate_hover_transition :: proc(pos: win.POINT) {
+	next: win.RECT
+	for i in 0..<core.app.hover_rect_count {
+		if core.point_in_rect(pos.x, pos.y, core.app.hover_rects[i]) {
+			next = core.app.hover_rects[i]
+		}
+	}
+	if next == core.app.hover_last {
+		return
+	}
+	invalidate_rect(core.app.hover_last)
+	invalidate_rect(next)
+}
+
+invalidate_tasks_scroll :: proc() {
+	geo := tasks_geometry()
+	invalidate_rect(win.RECT{geo.panel.left, geo.list_top, geo.panel.right, geo.list_bottom})
+}
+
+invalidate_settings_scroll :: proc() {
+	layout := settings_layout()
+	invalidate_rect(win.RECT{layout.body.left, layout.body.top, layout.outer.right, layout.body.bottom})
 }
 
 // Anti-aliased shapes go through one GDI+ Graphics per painting pass; text and
@@ -44,6 +102,11 @@ gdiplus_begin :: proc(dc: win.HDC) {
 	}
 	_ = platform.GdipSetSmoothingMode(graphics, platform.SMOOTHING_MODE_ANTIALIAS)
 	_ = platform.GdipSetPixelOffsetMode(graphics, platform.PIXEL_OFFSET_MODE_HALF)
+	if paint_dirty.right > paint_dirty.left && paint_dirty.bottom > paint_dirty.top {
+		_ = platform.GdipSetClipRect(graphics, f32(paint_dirty.left), f32(paint_dirty.top),
+			f32(paint_dirty.right - paint_dirty.left), f32(paint_dirty.bottom - paint_dirty.top),
+			platform.GDIP_COMBINE_REPLACE)
+	}
 	gfx = graphics
 }
 
@@ -51,6 +114,22 @@ gdiplus_end :: proc() {
 	if gfx != nil {
 		_ = platform.GdipDeleteGraphics(gfx)
 		gfx = nil
+	}
+}
+
+// Panels narrow the clip while they draw and call this afterwards: it restores
+// the paint's dirty rect rather than clearing the clip, so later shapes in the
+// same pass stay inside it.
+gdiplus_reset_clip :: proc() {
+	if gfx == nil {
+		return
+	}
+	if paint_dirty.right > paint_dirty.left && paint_dirty.bottom > paint_dirty.top {
+		_ = platform.GdipSetClipRect(gfx, f32(paint_dirty.left), f32(paint_dirty.top),
+			f32(paint_dirty.right - paint_dirty.left), f32(paint_dirty.bottom - paint_dirty.top),
+			platform.GDIP_COMBINE_REPLACE)
+	} else {
+		_ = platform.GdipResetClip(gfx)
 	}
 }
 
@@ -128,12 +207,25 @@ finish_hover_pass :: proc() {
 	core.start_ui_anim()
 }
 
+// Every live button rect is remembered for the pointer-move hit test, so a move
+// does not have to repaint the window to discover what it landed on.
+register_hover_rect :: proc(rect: win.RECT) {
+	if rect.right <= rect.left || rect.bottom <= rect.top {
+		return
+	}
+	if core.app.hover_rect_count < len(core.app.hover_rects) {
+		core.app.hover_rects[core.app.hover_rect_count] = rect
+		core.app.hover_rect_count += 1
+	}
+}
+
 // Lightens a hovered button and darkens one that is being held, drawn over the
 // button's fill and under its label.
 button_feedback :: proc(dc: win.HDC, rect: win.RECT, radius: i32, enabled: bool = true) {
 	if !enabled {
 		return
 	}
+	register_hover_rect(rect)
 	hover := hover_alpha(rect)
 	if hover > 0.02 {
 		tint_round(dc, rect, radius, {255, 255, 255}, u8(26*hover))
