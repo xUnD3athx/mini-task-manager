@@ -364,7 +364,9 @@ settings_group_heights :: proc() -> (modules_h, colors_h, appearance_h: i32) {
 		core.dip(26) + core.dip(10) + core.dip(14) +
 		// Safety block: divider gap, label, row and bottom padding.
 		core.dip(16) + core.dip(14) + core.dip(6) + core.dip(20) + core.dip(12)
-	appearance_h = core.dip(42) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
+	// The animation row sits above the themes, which start lower than the old
+	// 42dip header offset.
+	appearance_h = core.dip(72) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
 		core.dip(14) + core.dip(18) + core.dip(26) + core.dip(6) + core.dip(24)
 	return
 }
@@ -527,7 +529,7 @@ settings_custom_rect :: proc(layout: Settings_Layout, role: int) -> win.RECT {
 }
 
 settings_theme_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
-	y := layout.appearance.top + core.dip(42) + i32(index)*(core.dip(76) + core.dip(10))
+	y := layout.appearance.top + core.dip(72) + i32(index)*(core.dip(76) + core.dip(10))
 	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + core.dip(76)}
 }
 
@@ -568,6 +570,17 @@ settings_refresh_plus_rect :: proc(layout: Settings_Layout) -> win.RECT {
 	value := settings_refresh_value_rect(layout)
 	x := value.right + core.dip(6)
 	return win.RECT{x, value.top, x + core.dip(26), value.bottom}
+}
+
+// The animation row sits at the top of the appearance column, above the themes.
+settings_animation_row_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	y := layout.appearance.top + core.dip(26)
+	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + core.dip(20)}
+}
+
+settings_animation_switch_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	row := settings_animation_row_rect(layout)
+	return win.RECT{row.right - core.dip(40), row.top, row.right, row.bottom}
 }
 
 settings_dock_label_y :: proc(layout: Settings_Layout) -> i32 {

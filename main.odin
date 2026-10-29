@@ -637,13 +637,15 @@ start_drawer_anim :: proc(opening: bool) {
 	anim.from_h = core.app.height
 	anim.to_h = target
 
-	// Render the full frame once, so the steps only copy a slice of it. Doing
-	// this before the clock starts keeps the first frame from swallowing most
-	// of the animation.
-	if anim.from_h == target {
+	// Animations disabled: resize straight to the final height.
+	if !core.settings.animations || anim.from_h == target {
 		finish_drawer_anim()
 		return
 	}
+
+	// Render the full frame once, so the steps only copy a slice of it. Doing
+	// this before the clock starts keeps the first frame from swallowing most
+	// of the animation.
 	if core.app.mem_dc != nil {
 		ui.paint(core.app.mem_dc, win.RECT{0, 0, core.app.width, core.app.layout_h})
 		anim.frozen = true
@@ -658,6 +660,11 @@ step_drawer_anim :: proc() {
 	anim := &core.app.anim
 	if !anim.active {
 		_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
+		return
+	}
+	// Turning animations off mid-slide finishes it on the next tick.
+	if !core.settings.animations {
+		finish_drawer_anim()
 		return
 	}
 
@@ -684,6 +691,8 @@ finish_drawer_anim :: proc() {
 	_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
 
 	if opening {
+		// Also the landing point for animations disabled mid-slide.
+		set_window_height(anim.to_h)
 		services.refresh_window_preview()
 	} else {
 		core.app.view = .none
@@ -698,6 +707,16 @@ finish_drawer_anim :: proc() {
 // The wheel and the hover both only move targets; this timer eases the drawn
 // positions toward them and stops once everything has settled.
 step_ui_anim :: proc() {
+	// Turning animations off mid-flight lands every target at once.
+	if !core.settings.animations {
+		core.app.scroll = core.app.scroll_target
+		core.app.settings_scroll = core.app.settings_scroll_target
+		core.app.hover_amount = core.app.hover_active ? 1 : 0
+		core.stop_ui_anim()
+		_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+		return
+	}
+
 	// Nothing is scrollable while the drawer is closed; finish the pending move
 	// so reopening starts where the wheel left off.
 	if core.app.view == .none {

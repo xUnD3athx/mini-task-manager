@@ -340,6 +340,11 @@ handle_settings_click :: proc(x, y: i32) {
 		core.settings_toggle_unsafe_kill()
 		return
 	}
+
+	if core.point_in_rect(x, y, ui.settings_animation_row_rect(layout)) {
+		core.settings_toggle_animations()
+		return
+	}
 }
 
 handle_refresh_edit_char :: proc(ch: int) {
@@ -392,7 +397,12 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		}
 		core.app.scroll_target -= f32(steps) * 3 * f32(core.dip(core.TASK_ROW_HEIGHT_DIP))
 		ui.clamp_scroll()
-		core.start_ui_anim()
+		if core.settings.animations {
+			core.start_ui_anim()
+		} else {
+			core.app.scroll = core.app.scroll_target
+			ui.invalidate_tasks_scroll()
+		}
 	case .settings:
 		layout := ui.settings_layout()
 		if layout.scroll_max <= 0 ||
@@ -402,7 +412,12 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		}
 		core.app.settings_scroll_target -= f32(steps * core.dip(core.SETTINGS_SCROLL_STEP_DIP))
 		ui.clamp_settings_scroll()
-		core.start_ui_anim()
+		if core.settings.animations {
+			core.start_ui_anim()
+		} else {
+			core.app.settings_scroll = core.app.settings_scroll_target
+			ui.invalidate_settings_scroll()
+		}
 	case .none:
 		return
 	}

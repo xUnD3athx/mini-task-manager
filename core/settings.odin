@@ -133,6 +133,18 @@ confirm_unsafe_kill :: proc() -> bool {
 	return result == win.IDYES
 }
 
+// Covers the drawer slide, smooth scrolling and the hover fade. Everything
+// snaps when it is off; a running animation finishes on its next tick.
+settings_toggle_animations :: proc() {
+	settings.animations = !settings.animations
+	if settings.animations {
+		// Resume from a fully lit control instead of an invisible one.
+		app.hover_amount = app.hover_active ? 1 : 0
+	}
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
 apply_refresh_timer :: proc() {
 	if app.hwnd != nil {
 		_ = win.SetTimer(app.hwnd, TIMER_ID, u32(settings.refresh_ms), nil)
@@ -383,6 +395,8 @@ parse_settings :: proc(text: string) {
 			settings.risk_show[int(Risk_Tier.blocked)] = parse_bool(value)
 		case "unsafe_kill":
 			settings.unsafe_kill = parse_bool(value)
+		case "animations":
+			settings.animations = parse_bool(value)
 		}
 	}
 
@@ -457,10 +471,10 @@ save_settings :: proc() {
 	buf: [1024]u8
 	content := fmt.bprintf(
 		buf[:],
-		"version=5\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
+		"version=6\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
 		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\nrefresh_ms=%d\n" +
 		"refresh_custom=%d\nrefresh_custom_mode=%d\ndock=%d\n" +
-		"risk_show_unknown=%d\nrisk_show_safe=%d\nrisk_show_risky=%d\nrisk_show_blocked=%d\nunsafe_kill=%d\n",
+		"risk_show_unknown=%d\nrisk_show_safe=%d\nrisk_show_risky=%d\nrisk_show_blocked=%d\nunsafe_kill=%d\nanimations=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -486,6 +500,7 @@ save_settings :: proc() {
 		int(settings.risk_show[int(Risk_Tier.risky)]),
 		int(settings.risk_show[int(Risk_Tier.blocked)]),
 		int(settings.unsafe_kill),
+		int(settings.animations),
 	)
 	_ = os.write_entire_file(path, content)
 }

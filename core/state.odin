@@ -183,6 +183,9 @@ Settings :: struct {
 	// Lets the detail page end blocked tasks. Off by default, because it
 	// reaches critical and protected system processes.
 	unsafe_kill:       bool,
+	// Drawer slide, smooth scrolling and the hover fade. Turning it off makes
+	// every transition instant.
+	animations:        bool,
 }
 
 Sort_Field :: enum {
@@ -280,6 +283,7 @@ default_settings :: proc() -> Settings {
 		dock = .top,
 		risk_show = RISK_SHOW_DEFAULT,
 		unsafe_kill = false,
+		animations = true,
 	}
 }
 
@@ -756,7 +760,7 @@ kill_arm_active :: proc() -> bool {
 // The UI timer is shared by scrolling and the hover fade, so starting it twice
 // must not restart the frame clock.
 start_ui_anim :: proc() {
-	if app.hwnd == nil || app.ui_anim_running {
+	if app.hwnd == nil || app.ui_anim_running || !settings.animations {
 		return
 	}
 	app.ui_anim_running = true

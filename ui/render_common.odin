@@ -193,6 +193,9 @@ hover_alpha :: proc(rect: win.RECT) -> f32 {
 		return 0
 	}
 	core.app.hover_rect = rect
+	if !core.settings.animations {
+		return 1
+	}
 	return core.app.hover_amount
 }
 
@@ -204,7 +207,9 @@ finish_hover_pass :: proc() {
 	}
 	core.app.hover_last = core.app.hover_rect
 	core.app.hover_active = core.app.hover_rect.right > core.app.hover_rect.left
-	core.start_ui_anim()
+	if core.settings.animations {
+		core.start_ui_anim()
+	}
 }
 
 // Every live button rect is remembered for the pointer-move hit test, so a move

@@ -308,6 +308,15 @@ draw_settings_view :: proc(dc: win.HDC) {
 			core.app.fonts.small, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
 
+	anim_row := settings_animation_row_rect(layout)
+	anim_switch := settings_animation_switch_rect(layout)
+	button_feedback(dc, anim_row, core.dip(8))
+	draw_text(dc, "Animations", anim_row.left, anim_row.top,
+		anim_switch.left - core.dip(10) - anim_row.left, anim_row.bottom - anim_row.top,
+		core.app.fonts.small, core.COL_TEXT,
+		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
+	draw_switch(dc, anim_switch, core.settings.animations, true)
+
 	gdiplus_reset_clip()
 	_ = win.RestoreDC(dc, saved)
 
