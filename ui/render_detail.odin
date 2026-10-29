@@ -29,6 +29,26 @@ selected_risk :: proc() -> (tier: core.Risk_Tier, reason: core.Risk_Reason) {
 	return .unknown, .no_signal
 }
 
+// The pill describes what the risk filter shows; the end-task button has to
+// describe what it would end. An application row ends every process that shares
+// its name, including the ones the filter hides, so the whole group's worst tier
+// is what guards the button.
+selected_kill_risk :: proc() -> core.Risk_Tier {
+	if core.app.group_selected {
+		for i in 0..<core.app.group_count {
+			g := &core.app.groups[i]
+			if services.same_task_name(g.name, core.app.selected_group) {
+				return g.risk
+			}
+		}
+		return .unknown
+	}
+	if p, found := services.find_process(core.app.selected_pid); found {
+		return p.risk
+	}
+	return .unknown
+}
+
 // Detail page for the selected task: its window on the left, a monitoring
 // dashboard of curves on the right.
 draw_task_view :: proc(dc: win.HDC) {
@@ -164,6 +184,55 @@ draw_task_detail :: proc(dc: win.HDC, rect: win.RECT) {
 		scaled_peak(t.threads_samples[:], 1), core.app.pens.cpu, core.app.brushes.cpu_fill)
 	draw_metric_card(dc, layout.handles, "HANDLES", handles_value, t.handles_samples[:],
 		scaled_peak(t.handles_samples[:], 1), core.app.pens.cpu, core.app.brushes.cpu_fill)
+
+	draw_end_task_button(dc, end_task_button_rect(rect))
+}
+
+// The action follows the tier: safe ends the task directly, risky and unknown
+// ask by splitting into confirm/cancel, and blocked stays locked until unsafe
+// mode is on.
+draw_end_task_button :: proc(dc: win.HDC, slot: win.RECT) {
+	if slot.right <= slot.left || slot.bottom <= slot.top {
+		return
+	}
+	radius := core.dip(7)
+	label_flags := platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS
+
+	if core.kill_arm_active() {
+		confirm := end_task_confirm_rect(slot)
+		cancel := end_task_cancel_rect(slot)
+		fill_round(dc, confirm, core.app.brushes.risk_blocked, core.app.pens.null, radius)
+		draw_text(dc, "CONFIRM", confirm.left, confirm.top, confirm.right - confirm.left, confirm.bottom - confirm.top,
+			core.app.fonts.small, core.COL_BADGE_TEXT, label_flags)
+		fill_round(dc, cancel, core.app.brushes.badge, core.app.pens.border, radius)
+		draw_text(dc, "CANCEL", cancel.left, cancel.top, cancel.right - cancel.left, cancel.bottom - cancel.top,
+			core.app.fonts.small, core.COL_TEXT, label_flags)
+		return
+	}
+
+	tier := selected_kill_risk()
+	disabled := end_task_disabled()
+	brush := core.app.brushes.accent
+	pen := core.app.pens.null
+	text_color := core.COL_BADGE_TEXT
+	label := "END TASK"
+
+	switch {
+	case disabled:
+		brush = core.app.brushes.badge
+		pen = core.app.pens.border
+		text_color = core.COL_MUTED
+		label = "CAN'T KILL"
+	case tier == .blocked:
+		// Only reachable with unsafe mode on.
+		brush = core.app.brushes.risk_blocked
+	case tier == .risky || tier == .unknown:
+		brush = core.app.brushes.risk_risky
+	}
+
+	fill_round(dc, slot, brush, pen, radius)
+	draw_text(dc, label, slot.left, slot.top, slot.right - slot.left, slot.bottom - slot.top,
+		core.app.fonts.small, text_color, label_flags)
 }
 
 // Cards with values in bytes/thread counts need a peak-relative scale instead of

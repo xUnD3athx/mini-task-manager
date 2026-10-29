@@ -34,9 +34,9 @@ open_color_picker :: proc(role: int) {
 	cc.lpCustColors = &color_custom_colors[0]
 	cc.Flags = platform.CC_RGBINIT | platform.CC_FULLOPEN | platform.CC_ANYCOLOR
 
-	app.color_dialog_open = true
+	app.modal_open = true
 	ok := platform.ChooseColorW(&cc)
-	app.color_dialog_open = false
+	app.modal_open = false
 
 	if ok {
 		color := Color{
@@ -84,6 +84,53 @@ settings_toggle_risk_tier :: proc(tier: Risk_Tier) {
 	settings.risk_show[int(tier)] = !settings.risk_show[int(tier)]
 	save_settings()
 	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+// Unsafe mode widens the detail page's end-task button to blocked tasks. It is
+// the only setting that can damage the running system, so turning it on asks
+// first; turning it off is always allowed and needs no prompt.
+settings_toggle_unsafe_kill :: proc() {
+	kill_arm_clear()
+
+	if settings.unsafe_kill {
+		settings.unsafe_kill = false
+		save_settings()
+		_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+		return
+	}
+
+	if !confirm_unsafe_kill() {
+		return
+	}
+	settings.unsafe_kill = true
+	save_settings()
+	_ = win.InvalidateRect(app.hwnd, nil, win.FALSE)
+}
+
+confirm_unsafe_kill :: proc() -> bool {
+	text := "Unsafe mode lets you end blocked tasks.\r\n\r\n" +
+		"Blocked tasks include critical and protected system processes. " +
+		"Ending them can freeze the desktop, crash Windows, or force a restart.\r\n\r\n" +
+		"Turn on unsafe mode?"
+	text_buf: [512]u16
+	title_buf: [64]u16
+	message := win.utf8_to_wstring_buf(text_buf[:], text)
+	caption := win.utf8_to_wstring_buf(title_buf[:], "MiniTaskManager")
+	if message == nil || caption == nil {
+		return false
+	}
+
+	// A message box takes the focus away from the drawer, which would otherwise
+	// read as "clicked elsewhere" and close it.
+	app.modal_open = true
+	result := win.MessageBoxW(
+		app.hwnd,
+		message,
+		caption,
+		win.MB_YESNO | win.MB_ICONWARNING | win.MB_DEFBUTTON2,
+	)
+	app.modal_open = false
+	return result == win.IDYES
 }
 
 apply_refresh_timer :: proc() {
@@ -334,6 +381,8 @@ parse_settings :: proc(text: string) {
 			settings.risk_show[int(Risk_Tier.risky)] = parse_bool(value)
 		case "risk_show_blocked":
 			settings.risk_show[int(Risk_Tier.blocked)] = parse_bool(value)
+		case "unsafe_kill":
+			settings.unsafe_kill = parse_bool(value)
 		}
 	}
 
@@ -408,10 +457,10 @@ save_settings :: proc() {
 	buf: [1024]u8
 	content := fmt.bprintf(
 		buf[:],
-		"version=4\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
+		"version=5\nshow_cpu=%d\nshow_cores=%d\nshow_memory=%d\nshow_disk=%d\nshow_network=%d\nshow_gpu=%d\nshow_uptime=%d\n" +
 		"accent=%02X%02X%02X\nmemory_color=%02X%02X%02X\ngpu_color=%02X%02X%02X\ntheme=%d\ncores_per_page=%d\ncores_custom=%d\ncores_custom_mode=%d\nsort_field=%d\nsort_desc=%d\nrefresh_ms=%d\n" +
 		"refresh_custom=%d\nrefresh_custom_mode=%d\ndock=%d\n" +
-		"risk_show_unknown=%d\nrisk_show_safe=%d\nrisk_show_risky=%d\nrisk_show_blocked=%d\n",
+		"risk_show_unknown=%d\nrisk_show_safe=%d\nrisk_show_risky=%d\nrisk_show_blocked=%d\nunsafe_kill=%d\n",
 		int(settings.modules.cpu),
 		int(settings.modules.cores),
 		int(settings.modules.memory),
@@ -436,6 +485,7 @@ save_settings :: proc() {
 		int(settings.risk_show[int(Risk_Tier.safe)]),
 		int(settings.risk_show[int(Risk_Tier.risky)]),
 		int(settings.risk_show[int(Risk_Tier.blocked)]),
+		int(settings.unsafe_kill),
 	)
 	_ = os.write_entire_file(path, content)
 }

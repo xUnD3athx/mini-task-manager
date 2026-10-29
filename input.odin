@@ -1,5 +1,6 @@
 package main
 
+import "core:fmt"
 import win "core:sys/windows"
 import "core"
 import "platform"
@@ -69,6 +70,16 @@ handle_tasks_click :: proc(x, y: i32) {
 		return
 	}
 
+	// The end-task button spans the bottom of the monitoring column.
+	if core.app.has_selection {
+		view := ui.task_view_layout()
+		slot := ui.end_task_button_rect(view.detail)
+		if slot.right > slot.left && core.point_in_rect(x, y, slot) {
+			handle_end_task_click(x, y, slot)
+			return
+		}
+	}
+
 	geo := ui.tasks_geometry()
 	if geo.panel.right <= geo.panel.left {
 		return
@@ -120,6 +131,7 @@ handle_tasks_click :: proc(x, y: i32) {
 			if !core.app.group_selected || !services.same_task_name(core.app.selected_group, g.name) {
 				core.app.task = core.Task_Metrics{group_mode = true, group = g.name}
 			}
+			core.kill_arm_clear()
 			core.app.selected_group = g.name
 			core.app.group_selected = true
 			core.app.has_selection = true
@@ -130,6 +142,7 @@ handle_tasks_click :: proc(x, y: i32) {
 			if core.app.group_selected || p.pid != core.app.selected_pid {
 				core.app.task = core.Task_Metrics{pid = p.pid}
 			}
+			core.kill_arm_clear()
 			core.app.selected_pid = p.pid
 			core.app.group_selected = false
 			core.app.has_selection = true
@@ -137,6 +150,77 @@ handle_tasks_click :: proc(x, y: i32) {
 			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 		}
 	}
+}
+
+// Ends the selected task directly when it is safe, and asks otherwise by
+// turning the button into confirm/cancel.
+handle_end_task_click :: proc(x, y: i32, slot: win.RECT) {
+	if core.kill_arm_active() {
+		if core.point_in_rect(x, y, ui.end_task_confirm_rect(slot)) {
+			execute_end_task()
+		} else if core.point_in_rect(x, y, ui.end_task_cancel_rect(slot)) {
+			core.kill_arm_clear()
+			_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+		}
+		return
+	}
+
+	if ui.end_task_disabled() {
+		return
+	}
+
+	if ui.selected_kill_risk() == .safe {
+		execute_end_task()
+		return
+	}
+
+	core.kill_arm_set()
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+execute_end_task :: proc() {
+	killed, total, err := services.terminate_selected_task()
+	core.kill_arm_clear()
+
+	// The two-second process timer is too slow here: the ended task is usually
+	// the selected one, and its detail page must not survive it.
+	services.refresh_processes()
+	services.update_task_metrics()
+	services.refresh_window_preview()
+	ui.clamp_scroll()
+
+	if err != 0 {
+		show_end_task_error(killed, total, err)
+	}
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+show_end_task_error :: proc(killed, total: int, err: win.DWORD) {
+	message_buf: [768]u8
+	message: string
+	if killed > 0 {
+		message = fmt.bprintf(message_buf[:],
+			"Ended %d of %d processes.\r\n\r\nThe last one failed with error %d. " +
+			"Processes owned by another user or running elevated need administrator rights.",
+			killed, total, err)
+	} else {
+		message = fmt.bprintf(message_buf[:],
+			"Could not end the task (error %d).\r\n\r\n" +
+			"Processes owned by another user or running elevated need administrator rights.",
+			err)
+	}
+
+	text_buf: [800]u16
+	title_buf: [64]u16
+	text := win.utf8_to_wstring_buf(text_buf[:], message)
+	caption := win.utf8_to_wstring_buf(title_buf[:], "MiniTaskManager")
+	if text == nil || caption == nil {
+		return
+	}
+
+	core.app.modal_open = true
+	_ = win.MessageBoxW(core.app.hwnd, text, caption, win.MB_OK | win.MB_ICONERROR)
+	core.app.modal_open = false
 }
 
 handle_settings_click :: proc(x, y: i32) {
@@ -249,6 +333,11 @@ handle_settings_click :: proc(x, y: i32) {
 			settings_set_dock(dock_modes[i])
 			return
 		}
+	}
+
+	if core.point_in_rect(x, y, ui.settings_unsafe_row_rect(layout)) {
+		core.settings_toggle_unsafe_kill()
+		return
 	}
 }
 

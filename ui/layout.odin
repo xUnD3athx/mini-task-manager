@@ -207,7 +207,7 @@ Task_View_Layout :: struct {
 	show_preview: bool,
 }
 
-// Right-hand area of the tasks drawer while a task is selected: the window
+// Right-hand column of the tasks drawer while a task is selected: the window
 // preview on the left, the task's monitoring column on the right.
 task_view_layout :: proc() -> Task_View_Layout {
 	geo := tasks_geometry()
@@ -229,6 +229,44 @@ task_view_layout :: proc() -> Task_View_Layout {
 		}
 	}
 	return layout
+}
+
+// The end-task slot spans the bottom of the monitoring column, below the cards.
+// It is split in two while a confirmation is armed, so both halves live in the
+// same slot.
+end_task_button_rect :: proc(detail: win.RECT) -> win.RECT {
+	// A detail column too short to draw its cards leaves no button either;
+	// otherwise the bottom strip would be a clickable strip with no visible
+	// action.
+	cards := task_detail_layout(detail)
+	if cards.cpu.right <= cards.cpu.left {
+		return {}
+	}
+	h := core.dip(core.END_TASK_BUTTON_H_DIP)
+	top := detail.bottom - h
+	return win.RECT{detail.left, top, detail.right, top + h}
+}
+
+end_task_confirm_rect :: proc(slot: win.RECT) -> win.RECT {
+	gap := core.dip(6)
+	w := (slot.right - slot.left - gap)/2
+	return win.RECT{slot.left, slot.top, slot.left + w, slot.bottom}
+}
+
+end_task_cancel_rect :: proc(slot: win.RECT) -> win.RECT {
+	confirm := end_task_confirm_rect(slot)
+	return win.RECT{confirm.right + core.dip(6), slot.top, slot.right, slot.bottom}
+}
+
+// Blocked tasks stay locked until unsafe mode is on, and the app never offers to
+// end itself. The gate uses the kill tier, not the filtered one: a group row
+// ends hidden members too.
+end_task_disabled :: proc() -> bool {
+	if !core.app.has_selection {
+		return true
+	}
+	blocked := selected_kill_risk() == .blocked
+	return (blocked && !core.settings.unsafe_kill) || services.selected_task_is_self()
 }
 
 Task_Detail_Layout :: struct {
@@ -255,8 +293,9 @@ task_detail_layout :: proc(rect: win.RECT) -> Task_Detail_Layout {
 	gap := core.dip(12)
 	title_h := core.dip(30)
 	cpu_h := clamp(height * 22 / 100, core.dip(60), core.dip(124))
+	action_h := core.dip(core.END_TASK_BUTTON_H_DIP) + core.dip(core.END_TASK_ROW_GAP_DIP)
 
-	row_h := (height - title_h - cpu_h - 3*gap) / 3
+	row_h := (height - title_h - cpu_h - 3*gap - action_h) / 3
 	if row_h < core.dip(40) {
 		row_h = core.dip(40)
 	}
@@ -325,7 +364,9 @@ settings_group_heights :: proc() -> (modules_h, colors_h, appearance_h: i32) {
 	modules_h = core.dip(42) + 7*core.dip(36) + core.dip(14) + core.dip(18) +
 		core.dip(26) + core.dip(14) + core.dip(24)
 	colors_h = core.dip(42) + 2*core.dip(70) + core.dip(68) + core.dip(18) +
-		core.dip(26) + core.dip(10) + core.dip(14)
+		core.dip(26) + core.dip(10) + core.dip(14) +
+		// Safety block: divider gap, label, row and bottom padding.
+		core.dip(16) + core.dip(14) + core.dip(6) + core.dip(20) + core.dip(12)
 	appearance_h = core.dip(42) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
 		core.dip(14) + core.dip(18) + core.dip(26) + core.dip(6) + core.dip(24)
 	return
@@ -541,6 +582,22 @@ settings_dock_chip_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT
 	x := layout.colors.left + i32(index)*(w + gap)
 	y := settings_dock_label_y(layout) + core.dip(18)
 	return win.RECT{x, y, x + w, y + core.dip(26)}
+}
+
+// The safety block starts below the dock hint, which is drawn just under the
+// position chips.
+settings_unsafe_label_y :: proc(layout: Settings_Layout) -> i32 {
+	return settings_dock_chip_rect(layout, 0).bottom + core.dip(10) + core.dip(14) + core.dip(16)
+}
+
+settings_unsafe_row_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	y := settings_unsafe_label_y(layout) + core.dip(14) + core.dip(6)
+	return win.RECT{layout.colors.left, y, layout.colors.right, y + core.dip(20)}
+}
+
+settings_unsafe_switch_rect :: proc(layout: Settings_Layout) -> win.RECT {
+	row := settings_unsafe_row_rect(layout)
+	return win.RECT{row.right - core.dip(40), row.top, row.right, row.bottom}
 }
 
 task_sort_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {

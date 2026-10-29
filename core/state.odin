@@ -51,6 +51,9 @@ TASK_SORT_CHIP_H_DIP    :: 22
 TASK_SORT_CHIP_GAP_DIP  :: 6
 TASK_RISK_ROW_DIP       :: 70
 TASK_RISK_CHIP_H_DIP    :: 20
+// The action spans the monitoring column under the cards.
+END_TASK_BUTTON_H_DIP   :: 30
+END_TASK_ROW_GAP_DIP    :: 12
 
 Color :: [3]u8
 
@@ -170,6 +173,9 @@ Settings :: struct {
 	dock:              Dock_Mode,
 	// Indexed by Risk_Tier; a tier set to false is hidden from the task list.
 	risk_show:         [4]bool,
+	// Lets the detail page end blocked tasks. Off by default, because it
+	// reaches critical and protected system processes.
+	unsafe_kill:       bool,
 }
 
 Sort_Field :: enum {
@@ -266,6 +272,7 @@ default_settings :: proc() -> Settings {
 		refresh_custom = 750,
 		dock = .top,
 		risk_show = RISK_SHOW_DEFAULT,
+		unsafe_kill = false,
 	}
 }
 
@@ -601,7 +608,9 @@ App :: struct {
 	bar_h:              i32,
 	drawer_h:           i32,
 	view:               Drawer_View,
-	color_dialog_open:  bool,
+	// Set while a modal system dialog (color picker, confirmations) owns the
+	// input, so losing focus does not collapse the drawer under it.
+	modal_open:         bool,
 	deactivate_guard_until: u64,
 	refresh_edit:       bool,
 	refresh_edit_buf:   [8]u8,
@@ -643,6 +652,9 @@ App :: struct {
 	selected_group:  [MAX_NAME_U16]u16,
 	group_selected:  bool,
 	has_selection:   bool,
+	// The detail page shows confirm/cancel instead of "end task" while this is
+	// set. Any selection change clears it, so a stale target cannot be ended.
+	kill_armed:      bool,
 	scroll:          int,
 	last_process_ms: u64,
 	preview:         Window_Preview,
@@ -700,6 +712,20 @@ App :: struct {
 app: App
 next_processes: [MAX_PROCESSES]Process
 color_custom_colors: [16]win.COLORREF
+
+// The confirmation mode belongs to whatever is selected right now, so every
+// path that changes the selection clears it.
+kill_arm_set :: proc() {
+	app.kill_armed = app.has_selection
+}
+
+kill_arm_clear :: proc() {
+	app.kill_armed = false
+}
+
+kill_arm_active :: proc() -> bool {
+	return app.kill_armed && app.has_selection
+}
 
 // dip converts 96-DPI logical pixels to physical pixels.
 dip :: proc(v: i32) -> i32 {

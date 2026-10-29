@@ -265,6 +265,7 @@ clear_hidden_selection :: proc() {
 	core.app.has_selection = false
 	core.app.group_selected = false
 	core.app.task = {}
+	core.kill_arm_clear()
 	refresh_window_preview()
 }
 
@@ -605,11 +606,93 @@ refresh_processes :: proc() {
 			core.app.has_selection = false
 			core.app.group_selected = false
 			core.app.task = {}
+			core.kill_arm_clear()
 			refresh_window_preview()
 		}
 	}
 
 	build_task_groups()
+}
+
+// TerminateProcess returns before the process is gone, so waiting on the handle
+// keeps the refresh that follows from showing the ended row for one more sample.
+TERMINATE_WAIT_MS :: 500
+ERR_ACCESS_DENIED :: 5
+
+terminate_process :: proc(pid: u32) -> (ok: bool, err: win.DWORD) {
+	// Never end ourselves: the app would disappear before it could update its
+	// state or save the window position.
+	if pid == 0 || pid == win.GetCurrentProcessId() {
+		return false, ERR_ACCESS_DENIED
+	}
+
+	handle := win.OpenProcess(win.PROCESS_TERMINATE, win.FALSE, pid)
+	if handle == nil {
+		return false, win.GetLastError()
+	}
+	defer _ = win.CloseHandle(handle)
+
+	if win.TerminateProcess(handle, 1) == win.FALSE {
+		return false, win.GetLastError()
+	}
+	_ = win.WaitForSingleObject(handle, TERMINATE_WAIT_MS)
+	return true, 0
+}
+
+// The end-task button is disabled on our own process.
+selected_task_is_self :: proc() -> bool {
+	if !core.app.has_selection {
+		return false
+	}
+	self := win.GetCurrentProcessId()
+	if core.app.group_selected {
+		for i in 0..<core.app.process_count {
+			p := &core.app.processes[i]
+			if p.pid == self && same_task_name(p.name, core.app.selected_group) {
+				return true
+			}
+		}
+		return false
+	}
+	return core.app.selected_pid == self
+}
+
+// Ends the selected task. A process row ends one pid; an application row ends
+// every process with that executable name, because a surviving helper would keep
+// the application running. Returns the ended count and the first error, so a
+// partial group kill can be reported instead of silently failing.
+terminate_selected_task :: proc() -> (killed, total: int, err: win.DWORD) {
+	if !core.app.has_selection {
+		return
+	}
+
+	if core.app.group_selected {
+		for i in 0..<core.app.process_count {
+			p := &core.app.processes[i]
+			if !same_task_name(p.name, core.app.selected_group) {
+				continue
+			}
+			total += 1
+			ok, kill_err := terminate_process(p.pid)
+			if ok {
+				killed += 1
+			} else if err == 0 {
+				err = kill_err
+			}
+		}
+		return
+	}
+
+	if p, found := find_process(core.app.selected_pid); found {
+		total = 1
+		ok, kill_err := terminate_process(p.pid)
+		if ok {
+			killed = 1
+		} else {
+			err = kill_err
+		}
+	}
+	return
 }
 
 push_sample :: proc(samples: []f32, v: f32) {

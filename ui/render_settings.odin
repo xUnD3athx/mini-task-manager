@@ -183,6 +183,28 @@ draw_settings_view :: proc(dc: win.HDC) {
 		layout.colors.right - layout.colors.left, core.dip(14),
 		core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
 
+	// Safety block: the only switch that changes what the end-task button may
+	// reach, so it reads as a warning once it is on.
+	safety_y := settings_unsafe_label_y(layout)
+	safety_divider := win.RECT{layout.colors.left, safety_y - core.dip(16), layout.colors.right, safety_y - core.dip(15)}
+	_ = win.FillRect(dc, &safety_divider, core.app.brushes.line)
+
+	safety_color := core.COL_MUTED
+	if core.settings.unsafe_kill {
+		safety_color = core.COL_RISK_RISKY
+	}
+	draw_text(dc, "SAFETY", layout.colors.left, safety_y,
+		layout.colors.right - layout.colors.left, core.dip(14),
+		core.app.fonts.tiny, safety_color, platform.DT_LEFT | platform.DT_SINGLELINE)
+
+	safety_row := settings_unsafe_row_rect(layout)
+	safety_switch := settings_unsafe_switch_rect(layout)
+	draw_text(dc, "End blocked tasks", safety_row.left, safety_row.top,
+		safety_switch.left - core.dip(10) - safety_row.left, safety_row.bottom - safety_row.top,
+		core.app.fonts.small, core.COL_TEXT,
+		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
+	draw_switch(dc, safety_switch, core.settings.unsafe_kill, true, core.app.brushes.risk_risky)
+
 	for i in 0..<len(core.THEMES) {
 		preview := settings_theme_rect(layout, i)
 		theme := core.THEMES[i]
@@ -312,10 +334,13 @@ draw_settings_scrollbar :: proc(dc: win.HDC, layout: Settings_Layout) {
 	_ = win.FillRect(dc, &thumb, core.app.brushes.thumb)
 }
 
-draw_switch :: proc(dc: win.HDC, rect: win.RECT, on: bool, enabled: bool) {
+draw_switch :: proc(dc: win.HDC, rect: win.RECT, on: bool, enabled: bool, on_brush: win.HBRUSH = nil) {
 	track := core.app.brushes.track
 	if on && enabled {
 		track = core.app.brushes.accent
+		if on_brush != nil {
+			track = on_brush
+		}
 	}
 	fill_round(dc, rect, track, core.app.pens.null, (rect.bottom - rect.top)/2)
 

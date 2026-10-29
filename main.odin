@@ -224,7 +224,7 @@ window_proc :: proc "system" (
 		// collapse it.
 		if u16(wparam & 0xffff) == win.WA_INACTIVE && core.app.view != .none &&
 		   core.settings.dock != .standalone &&
-		   !core.app.color_dialog_open && platform.GetTickCount64() >= core.app.deactivate_guard_until {
+		   !core.app.modal_open && platform.GetTickCount64() >= core.app.deactivate_guard_until {
 			close_view()
 		}
 		return 0
@@ -239,6 +239,11 @@ window_proc :: proc "system" (
 		if int(wparam) == win.VK_ESCAPE {
 			if core.app.refresh_edit {
 				core.cancel_refresh_edit()
+				return 0
+			}
+			if core.kill_arm_active() {
+				core.kill_arm_clear()
+				_ = win.InvalidateRect(hwnd, nil, win.FALSE)
 				return 0
 			}
 			if core.app.view != .none {
@@ -496,6 +501,7 @@ open_view :: proc(view: core.Drawer_View) {
 		core.app.layout_h = drawer_open_height()
 		resize_backbuffer()
 	}
+	core.kill_arm_clear()
 	if core.settings.dock == .standalone {
 		lift_standalone_open()
 	}
@@ -546,6 +552,7 @@ close_view :: proc() {
 	if core.app.view == .none && !core.app.anim.active {
 		return
 	}
+	core.kill_arm_clear()
 	// The preview is a separate top-level window, so it must not linger over
 	// the drawer while it shrinks.
 	services.destroy_window_preview()
@@ -556,6 +563,7 @@ close_view :: proc() {
 hide_view_now :: proc() {
 	core.app.anim.active = false
 	core.app.anim.frozen = false
+	core.kill_arm_clear()
 	_ = win.KillTimer(core.app.hwnd, core.ANIM_TIMER_ID)
 	core.app.view = .none
 	core.app.layout_h = core.app.bar_h
