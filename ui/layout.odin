@@ -362,11 +362,11 @@ settings_group_heights :: proc() -> (modules_h, colors_h, appearance_h: i32) {
 		core.dip(26) + core.dip(14) + core.dip(24)
 	colors_h = core.dip(42) + 2*core.dip(70) + core.dip(68) + core.dip(18) +
 		core.dip(26) + core.dip(10) + core.dip(14) +
-		// Safety block: divider gap, label, row and bottom padding.
-		core.dip(16) + core.dip(14) + core.dip(6) + core.dip(20) + core.dip(12)
-	// The animation row sits above the themes, which start lower than the old
-	// 42dip header offset.
-	appearance_h = core.dip(72) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
+		// Safety block: divider gap, label, toggle row and bottom padding.
+		core.dip(16) + core.dip(14) + core.dip(6) + core.dip(36) + core.dip(12)
+	// The animation toggle sits above the themes, which start lower than the
+	// old 42dip header offset.
+	appearance_h = core.dip(76) + 2*(core.dip(76) + core.dip(10)) + core.dip(76) +
 		core.dip(14) + core.dip(18) + core.dip(26) + core.dip(6) + core.dip(24)
 	return
 }
@@ -529,7 +529,7 @@ settings_custom_rect :: proc(layout: Settings_Layout, role: int) -> win.RECT {
 }
 
 settings_theme_rect :: proc(layout: Settings_Layout, index: int) -> win.RECT {
-	y := layout.appearance.top + core.dip(72) + i32(index)*(core.dip(76) + core.dip(10))
+	y := layout.appearance.top + core.dip(76) + i32(index)*(core.dip(76) + core.dip(10))
 	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + core.dip(76)}
 }
 
@@ -572,15 +572,21 @@ settings_refresh_plus_rect :: proc(layout: Settings_Layout) -> win.RECT {
 	return win.RECT{x, value.top, x + core.dip(26), value.bottom}
 }
 
+// Both settings toggles use the module-row metrics: a 36dip row with the switch
+// vertically centered and inset from the right edge.
+settings_toggle_switch_rect :: proc(row: win.RECT) -> win.RECT {
+	top := row.top + (row.bottom - row.top - core.dip(20))/2
+	return win.RECT{row.right - core.dip(56), top, row.right - core.dip(16), top + core.dip(20)}
+}
+
 // The animation row sits at the top of the appearance column, above the themes.
 settings_animation_row_rect :: proc(layout: Settings_Layout) -> win.RECT {
-	y := layout.appearance.top + core.dip(26)
-	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + core.dip(20)}
+	y := layout.appearance.top + core.dip(24)
+	return win.RECT{layout.appearance.left, y, layout.appearance.right, y + core.dip(36)}
 }
 
 settings_animation_switch_rect :: proc(layout: Settings_Layout) -> win.RECT {
-	row := settings_animation_row_rect(layout)
-	return win.RECT{row.right - core.dip(40), row.top, row.right, row.bottom}
+	return settings_toggle_switch_rect(settings_animation_row_rect(layout))
 }
 
 settings_dock_label_y :: proc(layout: Settings_Layout) -> i32 {
@@ -605,12 +611,11 @@ settings_unsafe_label_y :: proc(layout: Settings_Layout) -> i32 {
 
 settings_unsafe_row_rect :: proc(layout: Settings_Layout) -> win.RECT {
 	y := settings_unsafe_label_y(layout) + core.dip(14) + core.dip(6)
-	return win.RECT{layout.colors.left, y, layout.colors.right, y + core.dip(20)}
+	return win.RECT{layout.colors.left, y, layout.colors.right, y + core.dip(36)}
 }
 
 settings_unsafe_switch_rect :: proc(layout: Settings_Layout) -> win.RECT {
-	row := settings_unsafe_row_rect(layout)
-	return win.RECT{row.right - core.dip(40), row.top, row.right, row.bottom}
+	return settings_toggle_switch_rect(settings_unsafe_row_rect(layout))
 }
 
 task_sort_chip_rect :: proc(panel: win.RECT, index: int) -> win.RECT {
