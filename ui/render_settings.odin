@@ -65,7 +65,8 @@ draw_settings_view :: proc(dc: win.HDC) {
 			label_color = core.COL_MUTED
 		}
 		button_feedback(dc, row, core.dip(8), !disabled)
-		draw_text(dc, core.module_label(id), row.left, row.top, row.right - row.left - core.dip(70), row.bottom - row.top,
+		draw_text(dc, core.module_label(id), row.left + core.dip(12), row.top,
+			row.right - row.left - core.dip(82), row.bottom - row.top,
 			core.app.fonts.small, label_color, platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE)
 
 		switch_rect := win.RECT{row.right - core.dip(56), row.top + (row.bottom - row.top - core.dip(20))/2,
@@ -206,8 +207,8 @@ draw_settings_view :: proc(dc: win.HDC) {
 	safety_row := settings_unsafe_row_rect(layout)
 	safety_switch := settings_unsafe_switch_rect(layout)
 	button_feedback(dc, safety_row, core.dip(8))
-	draw_text(dc, "End blocked tasks", safety_row.left, safety_row.top,
-		safety_switch.left - core.dip(10) - safety_row.left, safety_row.bottom - safety_row.top,
+	draw_text(dc, "End blocked tasks", safety_row.left + core.dip(12), safety_row.top,
+		safety_switch.left - core.dip(10) - safety_row.left - core.dip(12), safety_row.bottom - safety_row.top,
 		core.app.fonts.small, core.COL_TEXT,
 		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
 	draw_switch(dc, safety_switch, core.settings.unsafe_kill, true, core.app.brushes.risk_risky)
@@ -311,8 +312,8 @@ draw_settings_view :: proc(dc: win.HDC) {
 	anim_row := settings_animation_row_rect(layout)
 	anim_switch := settings_animation_switch_rect(layout)
 	button_feedback(dc, anim_row, core.dip(8))
-	draw_text(dc, "Animations", anim_row.left, anim_row.top,
-		anim_switch.left - core.dip(10) - anim_row.left, anim_row.bottom - anim_row.top,
+	draw_text(dc, "Animations", anim_row.left + core.dip(12), anim_row.top,
+		anim_switch.left - core.dip(10) - anim_row.left - core.dip(12), anim_row.bottom - anim_row.top,
 		core.app.fonts.small, core.COL_TEXT,
 		platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)
 	draw_switch(dc, anim_switch, core.settings.animations, true)
