@@ -10,9 +10,10 @@ TIMER_ID :: 1
 // the two can run at different rates.
 ANIM_TIMER_ID :: 2
 DRAWER_ANIM_MS :: 170
-// Eases the wheel's scroll targets; runs only until both lists settle.
-SCROLL_TIMER_ID :: 3
-SCROLL_STEP_MS :: 15
+// Eases the wheel's scroll targets and the button hover fade; runs only while
+// something is still animating.
+UI_TIMER_ID :: 3
+UI_STEP_MS :: 15
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
@@ -628,7 +629,7 @@ App :: struct {
 	standalone_w:       i32,
 	standalone_h:       i32,
 	// Drawn scroll positions in pixels; the targets are what the wheel moves and
-	// SCROLL_TIMER_ID eases the two together.
+	// UI_TIMER_ID eases the two together.
 	settings_scroll:        f32,
 	settings_scroll_target: f32,
 
@@ -663,6 +664,19 @@ App :: struct {
 	kill_armed:      bool,
 	scroll:          f32,
 	scroll_target:   f32,
+	// Pointer feedback for buttons. Hover identifies a single control by its
+	// rect during a paint pass; the press is anchored to where the button went
+	// down so dragging off cancels it.
+	mouse_pos:       win.POINT,
+	mouse_inside:    bool,
+	mouse_down:      bool,
+	press_pos:       win.POINT,
+	press_valid:     bool,
+	hover_amount:    f32,
+	hover_rect:      win.RECT,
+	hover_last:      win.RECT,
+	hover_active:    bool,
+	ui_anim_running: bool,
 	last_process_ms: u64,
 	preview:         Window_Preview,
 	task:            Task_Metrics,
@@ -732,6 +746,21 @@ kill_arm_clear :: proc() {
 
 kill_arm_active :: proc() -> bool {
 	return app.kill_armed && app.has_selection
+}
+
+// The UI timer is shared by scrolling and the hover fade, so starting it twice
+// must not restart the frame clock.
+start_ui_anim :: proc() {
+	if app.hwnd == nil || app.ui_anim_running {
+		return
+	}
+	app.ui_anim_running = true
+	_ = win.SetTimer(app.hwnd, UI_TIMER_ID, u32(UI_STEP_MS), nil)
+}
+
+stop_ui_anim :: proc() {
+	app.ui_anim_running = false
+	_ = win.KillTimer(app.hwnd, UI_TIMER_ID)
 }
 
 // dip converts 96-DPI logical pixels to physical pixels.

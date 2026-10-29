@@ -15,6 +15,10 @@ paint :: proc(dc: win.HDC) {
 	full := win.RECT{0, 0, core.app.width, core.app.layout_h}
 	_ = win.FillRect(dc, &full, core.app.brushes.bg)
 
+	// Buttons claim this during the pass; whatever is left over is the control
+	// under the pointer this frame.
+	core.app.hover_rect = {}
+
 	if core.app.view != .none && core.app.layout_h > core.app.bar_h {
 		gdiplus_begin(dc)
 		draw_drawer(dc)
@@ -24,6 +28,8 @@ paint :: proc(dc: win.HDC) {
 	gdiplus_begin(dc)
 	draw_bar(dc)
 	gdiplus_end()
+
+	finish_hover_pass()
 }
 
 // Anti-aliased shapes go through one GDI+ Graphics per painting pass; text and
@@ -96,6 +102,69 @@ fill_round :: proc(dc: win.HDC, rect: win.RECT, brush: win.HBRUSH, pen: win.HPEN
 
 fill_color_rect :: proc(dc: win.HDC, rect: win.RECT, color: core.Color, radius: i32) {
 	fill_shape(dc, rect, radius, color, true, {}, false, 0)
+}
+
+// Hover is a single control at a time, identified by its rect: the button under
+// the pointer claims it for this pass and reads the shared fade value.
+hover_alpha :: proc(rect: win.RECT) -> f32 {
+	if !core.app.mouse_inside {
+		return 0
+	}
+	if !core.point_in_rect(core.app.mouse_pos.x, core.app.mouse_pos.y, rect) {
+		return 0
+	}
+	core.app.hover_rect = rect
+	return core.app.hover_amount
+}
+
+// Runs once per paint pass. A different control under the pointer restarts the
+// fade, and a pressed/held control keeps the timer alive.
+finish_hover_pass :: proc() {
+	if core.app.hover_rect == core.app.hover_last {
+		return
+	}
+	core.app.hover_last = core.app.hover_rect
+	core.app.hover_active = core.app.hover_rect.right > core.app.hover_rect.left
+	core.start_ui_anim()
+}
+
+// Lightens a hovered button and darkens one that is being held, drawn over the
+// button's fill and under its label.
+button_feedback :: proc(dc: win.HDC, rect: win.RECT, radius: i32, enabled: bool = true) {
+	if !enabled {
+		return
+	}
+	hover := hover_alpha(rect)
+	if hover > 0.02 {
+		tint_round(dc, rect, radius, {255, 255, 255}, u8(26*hover))
+	}
+	pressed := core.app.mouse_down && core.app.press_valid &&
+		core.point_in_rect(core.app.press_pos.x, core.app.press_pos.y, rect) &&
+		core.point_in_rect(core.app.mouse_pos.x, core.app.mouse_pos.y, rect)
+	if pressed {
+		tint_round(dc, rect, radius, {0, 0, 0}, 60)
+	}
+}
+
+tint_round :: proc(dc: win.HDC, rect: win.RECT, radius: i32, color: core.Color, alpha: u8) {
+	if alpha == 0 || gfx == nil || rect.right <= rect.left || rect.bottom <= rect.top {
+		return
+	}
+	path := create_round_path(rect, radius)
+	if path == nil {
+		return
+	}
+	defer _ = platform.GdipDeletePath(path)
+
+	brush: rawptr
+	if platform.GdipCreateSolidFill(argb_alpha(color, alpha), &brush) == 0 {
+		_ = platform.GdipFillPath(gfx, brush, path)
+		_ = platform.GdipDeleteBrush(brush)
+	}
+}
+
+argb_alpha :: proc(c: core.Color, alpha: u8) -> u32 {
+	return u32(alpha) << 24 | u32(c[0]) << 16 | u32(c[1]) << 8 | u32(c[2])
 }
 
 fill_shape :: proc(

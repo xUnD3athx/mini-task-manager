@@ -118,6 +118,7 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 			color = core.COL_BADGE_TEXT
 		}
 		fill_round(dc, chip, brush, core.app.pens.border, core.dip(6))
+		button_feedback(dc, chip, core.dip(6))
 		draw_text(dc, label, chip.left, chip.top, chip.right - chip.left, chip.bottom - chip.top,
 			core.app.fonts.tiny, color, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
@@ -142,6 +143,7 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 			text_color = core.COL_BADGE_TEXT
 		}
 		fill_round(dc, chip, brush, core.app.pens.border, core.dip(6))
+		button_feedback(dc, chip, core.dip(6))
 		draw_text(dc, core.risk_label(tier), chip.left, chip.top,
 			chip.right - chip.left, chip.bottom - chip.top, core.app.fonts.tiny, text_color,
 			platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE | platform.DT_END_ELLIPSIS)

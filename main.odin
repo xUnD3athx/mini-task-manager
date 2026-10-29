@@ -178,8 +178,8 @@ window_proc :: proc "system" (
 			step_drawer_anim()
 			return 0
 		}
-		if wparam == core.SCROLL_TIMER_ID {
-			step_scroll_anim()
+		if wparam == core.UI_TIMER_ID {
+			step_ui_anim()
 			return 0
 		}
 		if wparam == core.TIMER_ID {
@@ -215,8 +215,47 @@ window_proc :: proc "system" (
 		}
 		return MA_ACTIVATE
 
+	case win.WM_MOUSEMOVE:
+		core.app.mouse_pos = mouse_lparam(lparam)
+		if !core.app.mouse_inside {
+			core.app.mouse_inside = true
+			tme := win.TRACKMOUSEEVENT {
+				cbSize    = u32(size_of(win.TRACKMOUSEEVENT)),
+				dwFlags   = win.TME_LEAVE,
+				hwndTrack = hwnd,
+			}
+			_ = win.TrackMouseEvent(&tme)
+		}
+		// WM_PAINT is low priority and coalesces, so this cannot flood the
+		// message loop with paints while the pointer moves.
+		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		return 0
+
+	case win.WM_MOUSELEAVE:
+		core.app.mouse_inside = false
+		core.app.mouse_down = false
+		core.app.press_valid = false
+		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		return 0
+
 	case win.WM_LBUTTONDOWN:
+		core.app.mouse_pos = mouse_lparam(lparam)
+		core.app.mouse_down = true
+		core.app.press_pos = core.app.mouse_pos
+		core.app.press_valid = true
 		handle_click(lparam)
+		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		return 0
+
+	case win.WM_LBUTTONUP:
+		core.app.mouse_down = false
+		core.app.press_valid = false
+		_ = win.InvalidateRect(hwnd, nil, win.FALSE)
+		return 0
+
+	case win.WM_CAPTURECHANGED:
+		core.app.mouse_down = false
+		core.app.press_valid = false
 		return 0
 
 	case win.WM_MOUSEWHEEL:
@@ -272,7 +311,7 @@ window_proc :: proc "system" (
 		remove_appbar(hwnd)
 		_ = win.KillTimer(hwnd, core.TIMER_ID)
 		_ = win.KillTimer(hwnd, core.ANIM_TIMER_ID)
-		_ = win.KillTimer(hwnd, core.SCROLL_TIMER_ID)
+		core.stop_ui_anim()
 		services.destroy_window_preview()
 		core.destroy_backbuffer()
 		destroy_resources()
@@ -658,29 +697,45 @@ finish_drawer_anim :: proc() {
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
 }
 
-// The wheel only moves the scroll targets; this timer eases the drawn positions
-// toward them and stops once both have settled.
-start_scroll_anim :: proc() {
-	if core.app.hwnd == nil {
-		return
-	}
-	_ = win.SetTimer(core.app.hwnd, core.SCROLL_TIMER_ID, u32(core.SCROLL_STEP_MS), nil)
-}
-
-step_scroll_anim :: proc() {
+// The wheel and the hover both only move targets; this timer eases the drawn
+// positions toward them and stops once everything has settled.
+step_ui_anim :: proc() {
 	// Nothing is scrollable while the drawer is closed; finish the pending move
 	// so reopening starts where the wheel left off.
 	if core.app.view == .none {
 		core.app.scroll = core.app.scroll_target
 		core.app.settings_scroll = core.app.settings_scroll_target
-		_ = win.KillTimer(core.app.hwnd, core.SCROLL_TIMER_ID)
-		return
 	}
 	moved_tasks := step_scroll(&core.app.scroll, core.app.scroll_target)
 	moved_settings := step_scroll(&core.app.settings_scroll, core.app.settings_scroll_target)
+	moved_hover := step_hover()
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
-	if !moved_tasks && !moved_settings {
-		_ = win.KillTimer(core.app.hwnd, core.SCROLL_TIMER_ID)
+	if !moved_tasks && !moved_settings && !moved_hover {
+		core.stop_ui_anim()
+	}
+}
+
+step_hover :: proc() -> bool {
+	target: f32 = 0
+	if core.app.hover_active {
+		target = 1
+	}
+	diff := target - core.app.hover_amount
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff < 0.02 {
+		core.app.hover_amount = target
+		return false
+	}
+	core.app.hover_amount += (target - core.app.hover_amount) * 0.35
+	return true
+}
+
+mouse_lparam :: proc(lparam: win.LPARAM) -> win.POINT {
+	return win.POINT {
+		x = i32(i16(u16(lparam & 0xffff))),
+		y = i32(i16(u16((lparam >> 16) & 0xffff))),
 	}
 }
 

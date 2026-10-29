@@ -202,9 +202,11 @@ draw_end_task_button :: proc(dc: win.HDC, slot: win.RECT) {
 		confirm := end_task_confirm_rect(slot)
 		cancel := end_task_cancel_rect(slot)
 		fill_round(dc, confirm, core.app.brushes.risk_blocked, core.app.pens.null, radius)
+		button_feedback(dc, confirm, radius)
 		draw_text(dc, "CONFIRM", confirm.left, confirm.top, confirm.right - confirm.left, confirm.bottom - confirm.top,
 			core.app.fonts.small, core.COL_BADGE_TEXT, label_flags)
 		fill_round(dc, cancel, core.app.brushes.badge, core.app.pens.border, radius)
+		button_feedback(dc, cancel, radius)
 		draw_text(dc, "CANCEL", cancel.left, cancel.top, cancel.right - cancel.left, cancel.bottom - cancel.top,
 			core.app.fonts.small, core.COL_TEXT, label_flags)
 		return
@@ -231,6 +233,7 @@ draw_end_task_button :: proc(dc: win.HDC, slot: win.RECT) {
 	}
 
 	fill_round(dc, slot, brush, pen, radius)
+	button_feedback(dc, slot, radius, !disabled)
 	draw_text(dc, label, slot.left, slot.top, slot.right - slot.left, slot.bottom - slot.top,
 		core.app.fonts.small, text_color, label_flags)
 }
@@ -362,6 +365,7 @@ draw_page_button :: proc(dc: win.HDC, rect: win.RECT, label: string, enabled: bo
 		return
 	}
 	fill_round(dc, rect, core.app.brushes.badge, core.app.pens.border, core.dip(6))
+	button_feedback(dc, rect, core.dip(6), enabled)
 	color := core.COL_MUTED
 	if enabled {
 		color = core.COL_TEXT

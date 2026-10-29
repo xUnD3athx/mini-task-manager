@@ -17,6 +17,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 		core.dip(420), core.dip(16), core.app.fonts.tiny, core.COL_MUTED, platform.DT_LEFT | platform.DT_SINGLELINE)
 
 	fill_round(dc, layout.reset, core.app.brushes.badge, core.app.pens.border, core.dip(8))
+	button_feedback(dc, layout.reset, core.dip(8))
 	draw_text(dc, "Reset defaults", layout.reset.left, layout.reset.top,
 		layout.reset.right - layout.reset.left, layout.reset.bottom - layout.reset.top,
 		core.app.fonts.small, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
@@ -63,6 +64,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 		if disabled {
 			label_color = core.COL_MUTED
 		}
+		button_feedback(dc, row, core.dip(8), !disabled)
 		draw_text(dc, core.module_label(id), row.left, row.top, row.right - row.left - core.dip(70), row.bottom - row.top,
 			core.app.fonts.small, label_color, platform.DT_LEFT | platform.DT_VCENTER | platform.DT_SINGLELINE)
 
@@ -101,6 +103,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 			text_color = core.COL_BADGE_TEXT
 		}
 		fill_round(dc, chip, brush, core.app.pens.border, core.dip(7))
+		button_feedback(dc, chip, core.dip(7))
 
 		draw_text(dc, label, chip.left, chip.top,
 			chip.right - chip.left, chip.bottom - chip.top, core.app.fonts.tiny, text_color,
@@ -141,6 +144,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 		for i in 0..<len(palette) {
 			swatch := settings_swatch_rect(layout, role, i)
 			fill_color_rect(dc, swatch, palette[i], core.dip(6))
+			button_feedback(dc, swatch, core.dip(6))
 			if palette[i] == current {
 				draw_text(dc, "✓", swatch.left, swatch.top, swatch.right - swatch.left, swatch.bottom - swatch.top,
 					core.app.fonts.badge, core.COL_BADGE_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
@@ -149,6 +153,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 
 		custom := settings_custom_rect(layout, role)
 		fill_round(dc, custom, core.app.brushes.badge, core.app.pens.border, core.dip(8))
+		button_feedback(dc, custom, core.dip(8))
 		draw_text(dc, "Custom…", custom.left, custom.top, custom.right - custom.left, custom.bottom - custom.top,
 			core.app.fonts.tiny, core.COL_TEXT, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 	}
@@ -171,6 +176,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 			text_color = core.COL_BADGE_TEXT
 		}
 		fill_round(dc, chip, brush, core.app.pens.border, core.dip(7))
+		button_feedback(dc, chip, core.dip(7))
 
 		draw_text(dc, dock_labels[i], chip.left, chip.top,
 			chip.right - chip.left, chip.bottom - chip.top, core.app.fonts.tiny, text_color,
@@ -199,6 +205,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 
 	safety_row := settings_unsafe_row_rect(layout)
 	safety_switch := settings_unsafe_switch_rect(layout)
+	button_feedback(dc, safety_row, core.dip(8))
 	draw_text(dc, "End blocked tasks", safety_row.left, safety_row.top,
 		safety_switch.left - core.dip(10) - safety_row.left, safety_row.bottom - safety_row.top,
 		core.app.fonts.small, core.COL_TEXT,
@@ -215,6 +222,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 
 		card_rect := win.RECT{preview.left + core.dip(16), preview.top + core.dip(38), preview.right - core.dip(16), preview.bottom - core.dip(16)}
 		fill_color_rect(dc, card_rect, theme.card, core.dip(5))
+		button_feedback(dc, preview, core.dip(8))
 
 		dot := win.RECT{preview.left + core.dip(14), preview.top + core.dip(10), preview.left + core.dip(22), preview.top + core.dip(18)}
 		fill_color_rect(dc, dot, core.settings.accent, core.dip(4))
@@ -263,6 +271,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 			text_color = core.COL_BADGE_TEXT
 		}
 		fill_round(dc, chip, brush, core.app.pens.border, core.dip(7))
+		button_feedback(dc, chip, core.dip(7))
 
 		draw_text(dc, label, chip.left, chip.top,
 			chip.right - chip.left, chip.bottom - chip.top, core.app.fonts.tiny, text_color,
@@ -281,6 +290,7 @@ draw_settings_view :: proc(dc: win.HDC) {
 		draw_page_button(dc, plus, "+", core.settings.refresh_ms < core.REFRESH_MAX_MS)
 
 		fill_round(dc, value_rect, core.app.brushes.badge, core.app.pens.border, core.dip(7))
+		button_feedback(dc, value_rect, core.dip(7))
 
 		text_buf: [16]u8
 		text := ""

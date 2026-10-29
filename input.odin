@@ -392,7 +392,7 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		}
 		core.app.scroll_target -= f32(steps) * 3 * f32(core.dip(core.TASK_ROW_HEIGHT_DIP))
 		ui.clamp_scroll()
-		start_scroll_anim()
+		core.start_ui_anim()
 	case .settings:
 		layout := ui.settings_layout()
 		if layout.scroll_max <= 0 ||
@@ -402,7 +402,7 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		}
 		core.app.settings_scroll_target -= f32(steps * core.dip(core.SETTINGS_SCROLL_STEP_DIP))
 		ui.clamp_settings_scroll()
-		start_scroll_anim()
+		core.start_ui_anim()
 	case .none:
 		return
 	}

@@ -124,6 +124,7 @@ draw_bar :: proc(dc: win.HDC) {
 
 	draw_settings_button(dc, settings_rect)
 
+	button_feedback(dc, exit, core.dip(7))
 	draw_text(dc, "×", exit.left, exit.top, exit.right - exit.left, exit.bottom - exit.top,
 		core.app.fonts.med, core.COL_MUTED, platform.DT_CENTER | platform.DT_VCENTER | platform.DT_SINGLELINE)
 
@@ -146,6 +147,7 @@ draw_tasks_button :: proc(dc: win.HDC) {
 
 	inner := win.RECT{rect.left + core.dip(3), core.dip(7), rect.right - core.dip(3), core.app.bar_h - core.dip(7)}
 	fill_round(dc, inner, background, core.app.pens.null, core.dip(10))
+	button_feedback(dc, inner, core.dip(10))
 
 	icon_size := core.dip(28)
 	icon_x := rect.left + core.dip(11)
@@ -188,6 +190,7 @@ draw_settings_button :: proc(dc: win.HDC, rect: win.RECT) {
 	if core.app.view == .settings {
 		fill_round(dc, rect, core.app.brushes.selected, core.app.pens.null, core.dip(7))
 	}
+	button_feedback(dc, rect, core.dip(7))
 
 	center_x := (rect.left + rect.right) / 2
 	center_y := (rect.top + rect.bottom) / 2
