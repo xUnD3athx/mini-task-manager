@@ -178,6 +178,10 @@ window_proc :: proc "system" (
 			step_drawer_anim()
 			return 0
 		}
+		if wparam == core.SCROLL_TIMER_ID {
+			step_scroll_anim()
+			return 0
+		}
 		if wparam == core.TIMER_ID {
 			if !core.app.pdh_attempted {
 				services.init_pdh_counters()
@@ -268,6 +272,7 @@ window_proc :: proc "system" (
 		remove_appbar(hwnd)
 		_ = win.KillTimer(hwnd, core.TIMER_ID)
 		_ = win.KillTimer(hwnd, core.ANIM_TIMER_ID)
+		_ = win.KillTimer(hwnd, core.SCROLL_TIMER_ID)
 		services.destroy_window_preview()
 		core.destroy_backbuffer()
 		destroy_resources()
@@ -498,6 +503,7 @@ open_view :: proc(view: core.Drawer_View) {
 		core.app.view = view
 		core.app.refresh_edit = false
 		core.app.settings_scroll = 0
+		core.app.settings_scroll_target = 0
 		core.app.layout_h = drawer_open_height()
 		resize_backbuffer()
 	}
@@ -650,6 +656,45 @@ finish_drawer_anim :: proc() {
 		services.refresh_window_preview()
 	}
 	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+}
+
+// The wheel only moves the scroll targets; this timer eases the drawn positions
+// toward them and stops once both have settled.
+start_scroll_anim :: proc() {
+	if core.app.hwnd == nil {
+		return
+	}
+	_ = win.SetTimer(core.app.hwnd, core.SCROLL_TIMER_ID, u32(core.SCROLL_STEP_MS), nil)
+}
+
+step_scroll_anim :: proc() {
+	// Nothing is scrollable while the drawer is closed; finish the pending move
+	// so reopening starts where the wheel left off.
+	if core.app.view == .none {
+		core.app.scroll = core.app.scroll_target
+		core.app.settings_scroll = core.app.settings_scroll_target
+		_ = win.KillTimer(core.app.hwnd, core.SCROLL_TIMER_ID)
+		return
+	}
+	moved_tasks := step_scroll(&core.app.scroll, core.app.scroll_target)
+	moved_settings := step_scroll(&core.app.settings_scroll, core.app.settings_scroll_target)
+	_ = win.InvalidateRect(core.app.hwnd, nil, win.FALSE)
+	if !moved_tasks && !moved_settings {
+		_ = win.KillTimer(core.app.hwnd, core.SCROLL_TIMER_ID)
+	}
+}
+
+step_scroll :: proc(pos: ^f32, target: f32) -> bool {
+	diff := target - pos^
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff < 0.5 {
+		pos^ = target
+		return false
+	}
+	pos^ += (target - pos^) * 0.25
+	return true
 }
 
 update_client_size :: proc(hwnd: win.HWND) {

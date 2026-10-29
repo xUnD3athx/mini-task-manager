@@ -329,13 +329,10 @@ task_detail_layout :: proc(rect: win.RECT) -> Task_Detail_Layout {
 
 clamp_scroll :: proc() {
 	visible := visible_process_rows()
-	max_scroll := max(core.app.task_row_count - visible, 0)
-	if core.app.scroll > max_scroll {
-		core.app.scroll = max_scroll
-	}
-	if core.app.scroll < 0 {
-		core.app.scroll = 0
-	}
+	row_h := f32(core.dip(core.TASK_ROW_HEIGHT_DIP))
+	max_scroll := f32(max(core.app.task_row_count - visible, 0)) * row_h
+	core.app.scroll = clamp(core.app.scroll, 0, max_scroll)
+	core.app.scroll_target = clamp(core.app.scroll_target, 0, max_scroll)
 }
 
 Settings_Mode :: enum {
@@ -452,7 +449,8 @@ settings_layout :: proc() -> Settings_Layout {
 		return layout
 	}
 	layout.scroll_max = max(layout.content_h - body_h, 0)
-	layout.scroll = clamp(core.app.settings_scroll, 0, layout.scroll_max)
+	scroll := clamp(core.app.settings_scroll, 0, f32(layout.scroll_max))
+	layout.scroll = i32(scroll + 0.5)
 	if layout.scroll == 0 {
 		return layout
 	}
@@ -464,7 +462,9 @@ settings_layout :: proc() -> Settings_Layout {
 }
 
 clamp_settings_scroll :: proc() {
-	core.app.settings_scroll = settings_layout().scroll
+	max_scroll := f32(settings_layout().scroll_max)
+	core.app.settings_scroll = clamp(core.app.settings_scroll, 0, max_scroll)
+	core.app.settings_scroll_target = clamp(core.app.settings_scroll_target, 0, max_scroll)
 }
 
 shift_rect :: proc(rect: win.RECT, dx, dy: i32) -> win.RECT {

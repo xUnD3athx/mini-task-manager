@@ -111,8 +111,9 @@ handle_tasks_click :: proc(x, y: i32) {
 		return
 	}
 
-	row := int((y - geo.list_top) / core.dip(core.TASK_ROW_HEIGHT_DIP))
-	index := core.app.scroll + row
+	row_h := core.dip(core.TASK_ROW_HEIGHT_DIP)
+	row := int((f32(y-geo.list_top) + core.app.scroll) / f32(row_h))
+	index := row
 	if row < geo.visible && index >= 0 && index < core.app.task_row_count {
 		item := core.app.task_rows[index]
 		switch item.kind {
@@ -389,8 +390,9 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		   pts.y < geo.list_top || pts.y >= geo.list_bottom {
 			return
 		}
-		core.app.scroll -= int(steps) * 3
+		core.app.scroll_target -= f32(steps) * 3 * f32(core.dip(core.TASK_ROW_HEIGHT_DIP))
 		ui.clamp_scroll()
+		start_scroll_anim()
 	case .settings:
 		layout := ui.settings_layout()
 		if layout.scroll_max <= 0 ||
@@ -398,8 +400,9 @@ handle_wheel :: proc(wparam: win.WPARAM) {
 		   pts.y < layout.body.top || pts.y >= layout.body.bottom {
 			return
 		}
-		core.app.settings_scroll -= steps * core.dip(core.SETTINGS_SCROLL_STEP_DIP)
+		core.app.settings_scroll_target -= f32(steps * core.dip(core.SETTINGS_SCROLL_STEP_DIP))
 		ui.clamp_settings_scroll()
+		start_scroll_anim()
 	case .none:
 		return
 	}

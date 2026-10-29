@@ -10,6 +10,9 @@ TIMER_ID :: 1
 // the two can run at different rates.
 ANIM_TIMER_ID :: 2
 DRAWER_ANIM_MS :: 170
+// Eases the wheel's scroll targets; runs only until both lists settle.
+SCROLL_TIMER_ID :: 3
+SCROLL_STEP_MS :: 15
 
 MAX_PROCESSES      :: 1024
 MAX_NAME_U16       :: 96
@@ -624,7 +627,10 @@ App :: struct {
 	standalone_pos:     win.POINT,
 	standalone_w:       i32,
 	standalone_h:       i32,
-	settings_scroll:    i32,
+	// Drawn scroll positions in pixels; the targets are what the wheel moves and
+	// SCROLL_TIMER_ID eases the two together.
+	settings_scroll:        f32,
+	settings_scroll_target: f32,
 
 	width, height: i32,
 	// Full height the drawer is laid out at. It stays at the open height while
@@ -655,7 +661,8 @@ App :: struct {
 	// The detail page shows confirm/cancel instead of "end task" while this is
 	// set. Any selection change clears it, so a stale target cannot be ended.
 	kill_armed:      bool,
-	scroll:          int,
+	scroll:          f32,
+	scroll_target:   f32,
 	last_process_ms: u64,
 	preview:         Window_Preview,
 	task:            Task_Metrics,

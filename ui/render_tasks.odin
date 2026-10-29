@@ -164,12 +164,32 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 	}
 
 	row_h := core.dip(core.TASK_ROW_HEIGHT_DIP)
-	for row in 0..<geo.visible {
-		index := core.app.scroll + row
-		if index < 0 || index >= core.app.task_row_count {
+	scroll := core.app.scroll
+	first := int(scroll / f32(row_h))
+	offset := i32(scroll - f32(first)*f32(row_h))
+
+	// A smooth scroll leaves the first and last rows half outside the list, so
+	// the rows are clipped to it in both GDI and GDI+.
+	saved := win.SaveDC(dc)
+	_ = platform.IntersectClipRect(dc, geo.panel.left + core.dip(1), geo.list_top,
+		geo.panel.right - core.dip(1), geo.list_bottom)
+	if gfx != nil {
+		_ = platform.GdipSetClipRect(gfx, f32(geo.panel.left + core.dip(1)), f32(geo.list_top),
+			f32(geo.panel.right - geo.panel.left - core.dip(2)), f32(geo.list_bottom - geo.list_top),
+			platform.GDIP_COMBINE_REPLACE)
+	}
+	rows_to_draw := geo.visible
+	if offset > 0 {
+		// The row below the last full one is partly visible mid-scroll. At rest
+		// the list keeps its blank sliver, exactly as before.
+		rows_to_draw += 1
+	}
+	for row in 0..<rows_to_draw {
+		index := first + row
+		if index >= core.app.task_row_count {
 			break
 		}
-		y := geo.list_top + i32(row)*row_h
+		y := geo.list_top - offset + i32(row)*row_h
 		item := core.app.task_rows[index]
 		switch item.kind {
 		case .group:
@@ -179,6 +199,10 @@ draw_tasks_panel :: proc(dc: win.HDC, geo: Tasks_Geometry) {
 				geo.panel.right, y, row_h)
 		}
 	}
+	if gfx != nil {
+		_ = platform.GdipResetClip(gfx)
+	}
+	_ = win.RestoreDC(dc, saved)
 
 	draw_list_scrollbar(dc, geo.panel.right, geo.list_top, geo.list_bottom, geo.visible)
 }
@@ -401,12 +425,19 @@ draw_list_scrollbar :: proc(dc: win.HDC, panel_right, list_top, list_bottom: i32
 
 	track_h := bottom - top
 	thumb_h := max(core.dip(26), track_h * i32(visible) / i32(core.app.task_row_count))
-	max_scroll := max(core.app.task_row_count - visible, 1)
+	max_scroll := f32(max(core.app.task_row_count - visible, 1)) * f32(core.dip(core.TASK_ROW_HEIGHT_DIP))
+	progress := core.app.scroll / max_scroll
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
 	travel := track_h - thumb_h
 	if travel < 0 {
 		travel = 0
 	}
-	thumb_y := top + travel * i32(core.app.scroll) / i32(max_scroll)
+	thumb_y := top + i32(f32(travel)*progress)
 
 	thumb_rect := win.RECT{track_x, thumb_y, track_x + core.dip(3), thumb_y + thumb_h}
 	_ = win.FillRect(dc, &thumb_rect, core.app.brushes.thumb)
